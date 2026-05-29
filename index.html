@@ -1695,7 +1695,7 @@ async function impLogirest(inp){
   // Find all result elements with id rLogirest
   const rEls=document.querySelectorAll('[id^="rLogirest"]');
   const setStatus=(html)=>rEls.forEach(el=>el.innerHTML=html);
-  setStatus(`<span style="color:var(--text2)"><i class="fa fa-spinner fa-spin"></i> Procesando ${files.length} PDF${files.length>1?'s'}…</span>`);
+  setStatus(`<span style="color:var(--text2)"><i class="fa fa-spinner fa-spin"></i> Procesando ${files.length} PDF${files.length>1?'s':''}…</span>`);
 
   let totalNew=0, totalLines=0, totalAlbaranes=0, errors=[];
 
