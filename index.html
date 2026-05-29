@@ -6,8 +6,8 @@
 <title>Gestión Biconcepto TGB · 100 Montaditos</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 <style>
 
 :root {
@@ -418,12 +418,12 @@ textarea.form-control { resize: vertical; min-height: 80px; }
     <div class="login-form">
       <input type="text"     id="loginUser" placeholder="Usuario"    value="gerente">
       <input type="password" id="loginPass" placeholder="Contraseña" value="1234">
-      <button onclick="doLogin()" class="btn-login">Entrar</button>
+      <button id="btnLogin" class="btn-login">Entrar</button>
     </div>
     <div class="login-roles">
-      <span onclick="quickLogin('admin')">Admin</span>
-      <span onclick="quickLogin('gerente')">Gerente</span>
-      <span onclick="quickLogin('encargado')">Encargado</span>
+      <span id="qlAdmin">Admin</span>
+      <span id="qlGerente">Gerente</span>
+      <span id="qlEncargado">Encargado</span>
     </div>
   </div>
 </div>
@@ -2115,16 +2115,37 @@ document.addEventListener('DOMContentLoaded', function(){
     if (!DB.jibbleData || DB.jibbleData.length === 0) {
       DB.jibbleData = JIBBLE_HISTORY;
     }
-    setInterval(function(){ if(DB.currentUser) save(); }, 3000);
-    // Asegurar que la pantalla de login es visible al arrancar
-    const ls = document.getElementById('loginScreen');
-    const app = document.getElementById('app');
+
+    // Enlazar botones de login de forma segura (funciona en Safari)
+    var btnLogin = document.getElementById('btnLogin');
+    if (btnLogin) btnLogin.addEventListener('click', doLogin);
+
+    var loginPass = document.getElementById('loginPass');
+    if (loginPass) loginPass.addEventListener('keydown', function(e){ if(e.key==='Enter') doLogin(); });
+
+    var loginUser = document.getElementById('loginUser');
+    if (loginUser) loginUser.addEventListener('keydown', function(e){ if(e.key==='Enter') doLogin(); });
+
+    var qlAdmin = document.getElementById('qlAdmin');
+    if (qlAdmin) qlAdmin.addEventListener('click', function(){ quickLogin('admin'); });
+
+    var qlGerente = document.getElementById('qlGerente');
+    if (qlGerente) qlGerente.addEventListener('click', function(){ quickLogin('gerente'); });
+
+    var qlEncargado = document.getElementById('qlEncargado');
+    if (qlEncargado) qlEncargado.addEventListener('click', function(){ quickLogin('encargado'); });
+
+    // Asegurar estado inicial correcto
+    var ls = document.getElementById('loginScreen');
+    var app = document.getElementById('app');
     if (ls) ls.classList.remove('hidden');
     if (app) app.classList.add('hidden');
+
+    setInterval(function(){ if(DB.currentUser) save(); }, 3000);
     console.log('✓ Biconcepto listo —', today());
   } catch(e) {
     console.error('❌ Error de arranque:', e);
-    alert('Error al iniciar la app: ' + e.message);
+    alert('Error al iniciar: ' + e.message);
   }
 });
 
