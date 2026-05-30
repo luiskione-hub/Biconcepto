@@ -133,6 +133,8 @@ html, body { height: 100%; font-family: var(--font); background: var(--bg); colo
 .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--radius-sm); font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all 0.15s; }
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-primary:hover { background: var(--accent2); }
+.btn-accent { background: var(--teal); color: #fff; }
+.btn-accent:hover { background: #0d9488; }
 .btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border2); }
 .btn-secondary:hover { background: var(--bg4); }
 .btn-danger { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.2); }
@@ -937,7 +939,8 @@ function pgSchedule(){
       <button class="btn btn-secondary btn-sm" onclick="calNav(-1)"><i class="fa fa-arrow-left"></i></button>
       <button class="btn btn-secondary btn-sm" onclick="calNav(0)">Hoy</button>
       <button class="btn btn-secondary btn-sm" onclick="calNav(1)"><i class="fa fa-arrow-right"></i></button>
-      ${hasTemplate?`<button class="btn btn-secondary btn-sm" onclick="applyTplMdl(${y},${m})" title="Aplicar plantilla de turnos al mes"><i class="fa fa-wand-magic-sparkles"></i> Plantilla</button>`:''}
+      <button class="btn btn-accent btn-sm" onclick="autoplanMdl()" title="Planificación automática por ventas"><i class="fa fa-wand-magic-sparkles"></i> Autoplanificar</button>
+      ${hasTemplate?`<button class="btn btn-secondary btn-sm" onclick="applyTplMdl(${y},${m})" title="Aplicar plantilla de turnos al mes"><i class="fa fa-calendar-days"></i> Plantilla</button>`:''}
       <button class="btn btn-secondary btn-sm" onclick="editTemplateMdl()" title="Editar plantilla semanal"><i class="fa fa-calendar-days"></i> Editar plantilla</button>
       <button class="btn btn-primary btn-sm" onclick="shiftMdl()"><i class="fa fa-plus"></i> Turno</button>
     </div>
@@ -1002,6 +1005,144 @@ function calClick(ds){
     </table></div>`:'<div style="color:var(--text3);padding:12px;font-size:13px">Sin turnos asignados. <a href="#" onclick="shiftMdl(\''+ds+'\')" style="color:var(--accent)">Añadir turno</a> o <a href="#" onclick="applyTemplateDayMdl(\''+ds+'\')" style="color:var(--accent)">aplicar plantilla</a>.</div>'}
   </div>`;
 }
+
+// ── PLANIFICACIÓN AUTOMÁTICA ─────────────────────────────────
+// Reglas base: {comida:[inicio,fin,nPersonas], cena:[inicio,fin,nPersonas]}
+// dow: 0=Dom,1=Lun,2=Mar,3=Mié,4=Jue,5=Vie,6=Sáb
+const PLAN_RULES = {
+  1:{comida:['10:00','16:00',4], cena:['16:00','00:30',4]}, // Lunes
+  2:{comida:['10:00','16:00',4], cena:['16:00','00:30',4]}, // Martes
+  3:{comida:['10:00','16:00',5], cena:['16:00','00:30',8]}, // Miércoles
+  4:{comida:['10:00','16:00',5], cena:['16:00','00:30',8]}, // Jueves
+  5:{comida:['10:00','16:00',4], cena:['16:00','00:30',6]}, // Viernes
+  6:{comida:['10:00','16:00',5], cena:['16:00','00:30',9]}, // Sábado
+  0:{comida:['10:00','16:00',6], cena:['16:00','00:30',7]}, // Domingo
+};
+
+// Calcula factor de ajuste por histórico: compara ventas semana equivalente año anterior
+function planFactor(ds){
+  const d=new Date(ds);
+  const dow=d.getDay();
+  // Buscar mismo día de semana del año anterior (+/- 3 días de la misma semana)
+  const lastYear=new Date(d); lastYear.setFullYear(lastYear.getFullYear()-1);
+  const diff=dow-lastYear.getDay();
+  lastYear.setDate(lastYear.getDate()+diff);
+  const lyDs=lastYear.toISOString().slice(0,10);
+  const lyVentas=salesOn(lyDs);
+  const thisVentas=salesOn(ds);
+  // Si hay histórico del año pasado, ajustar; si no, factor 1
+  if(lyVentas>0 && thisVentas>0){
+    const ratio=thisVentas/lyVentas;
+    if(ratio>1.25)return 1;   // +1 persona si ventas 25% superiores
+    if(ratio<0.75)return -1;  // -1 persona si ventas 25% inferiores
+  }
+  return 0;
+}
+
+// Devuelve empleados disponibles para un día/hora, respetando plantillas y vacaciones
+function availableEmps(ds, start, end){
+  const d=new Date(ds); const dow=d.getDay();
+  const vacas=new Set(DB.vacations.filter(v=>v.start<=ds&&v.end>=ds).map(v=>v.employee_id));
+  return DB.employees.filter(e=>{
+    if(!e.active||e.sick>0)return false;
+    if(vacas.has(e.id))return false;
+    // Si tiene plantilla fija para este día, solo disponible si coincide turno
+    if(e.fs&&e.fs.length){
+      const fDay=e.fs.filter(f=>f.d===dow);
+      if(fDay.length===0)return false; // no trabaja este día según plantilla
+    }
+    return true;
+  });
+}
+
+function autoplanMonth(y, m){
+  const mStr=`${y}-${String(m).padStart(2,'0')}`;
+  const days=new Date(y,m,0).getDate();
+  let added=0, skipped=0;
+
+  for(let d=1;d<=days;d++){
+    const ds=`${mStr}-${String(d).padStart(2,'0')}`;
+    const dow=new Date(ds).getDay();
+    const rule=PLAN_RULES[dow];
+    const factor=planFactor(ds);
+    const existing=DB.shifts.filter(s=>s.date===ds);
+
+    ['comida','cena'].forEach(franja=>{
+      const [start,end,base]=rule[franja];
+      const nTarget=Math.max(1,base+factor);
+      // Cuántos turnos de esta franja ya hay
+      const already=existing.filter(s=>s.start===start).length;
+      const needed=nTarget-already;
+      if(needed<=0){skipped++;return;}
+
+      // Obtener empleados disponibles y que no estén ya asignados en este turno
+      const assignedIds=new Set(existing.filter(s=>s.start===start).map(s=>s.employee_id));
+      const avail=availableEmps(ds,start,end).filter(e=>!assignedIds.has(e.id));
+
+      // Priorizar empleados con menos horas en el mes
+      const hrsMap={};
+      DB.employees.forEach(e=>{
+        hrsMap[e.id]=DB.shifts.filter(s=>s.date.startsWith(mStr)&&s.employee_id===e.id).reduce((a,s)=>a+hrsOf(s.start,s.end),0);
+      });
+      avail.sort((a,b)=>(hrsMap[a.id]||0)-(hrsMap[b.id]||0));
+
+      const toAssign=avail.slice(0,needed);
+      toAssign.forEach(emp=>{
+        const cost=parseFloat((hrsOf(start,end)*emp.hc).toFixed(2));
+        DB.shifts.push({id:maxId(DB.shifts),employee_id:emp.id,date:ds,start,end,cost,status:'auto'});
+        // Actualizar hrsMap para siguiente iteración
+        hrsMap[emp.id]=(hrsMap[emp.id]||0)+hrsOf(start,end);
+        added++;
+      });
+    });
+  }
+  save();
+  flash(`✓ Planificación generada: ${added} turnos añadidos${skipped>0?`, ${skipped} ya cubiertos`:''}`);
+  go('schedule');
+}
+
+function autoplanMdl(){
+  const now=new Date();
+  const y=parseInt(_store.getItem('cal_y')||now.getFullYear());
+  const m=parseInt(_store.getItem('cal_m')||now.getMonth()+1);
+  const mName=new Date(y,m-1,1).toLocaleString('es-ES',{month:'long',year:'numeric'});
+  const existing=DB.shifts.filter(s=>s.date.startsWith(`${y}-${String(m).padStart(2,'0')}`));
+
+  openModal(`Planificación automática — ${mName}`,`
+    <div style="margin-bottom:16px">
+      <p style="color:var(--text2);font-size:13px;margin-bottom:12px">
+        La planificación automática asignará turnos según las reglas de negocio:
+      </p>
+      <div style="background:var(--bg3);border-radius:8px;padding:12px;font-size:12px;color:var(--text2);margin-bottom:12px">
+        <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:6px 12px;align-items:center">
+          <strong style="color:var(--text)">Día</strong><strong style="color:var(--text)">Comida</strong><strong style="color:var(--text)">Cena</strong>
+          <span>Lun/Mar</span><span>4 personas</span><span>4 personas</span>
+          <span>Mié/Jue</span><span>5 personas</span><span>8 personas</span>
+          <span>Viernes</span><span>4 personas</span><span>6 personas</span>
+          <span>Sábado</span><span>5 personas</span><span>9 personas</span>
+          <span>Domingo</span><span>6 personas</span><span>7 personas</span>
+        </div>
+      </div>
+      <p style="font-size:12px;color:var(--text3)">
+        <i class="fa fa-chart-line" style="color:var(--accent)"></i>
+        El histórico de ventas ajusta ±1 persona si las ventas difieren más de un 25%.
+      </p>
+      ${existing.length>0?`<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--amber);margin-top:8px">
+        <i class="fa fa-triangle-exclamation"></i> Ya hay <strong>${existing.length} turnos</strong> en este mes. Solo se añadirán los que falten.
+      </div>`:''}
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-danger btn-sm" onclick="closeModal();DB.shifts=DB.shifts.filter(s=>!s.date.startsWith('${y}-${String(m).padStart(2,'0')}'));autoplanMonth(${y},${m})">
+        <i class="fa fa-rotate"></i> Borrar y regenerar
+      </button>
+      <button class="btn btn-primary" onclick="closeModal();autoplanMonth(${y},${m})">
+        <i class="fa fa-wand-magic-sparkles"></i> Generar turnos
+      </button>
+    </div>
+  `);
+}
+// ─────────────────────────────────────────────────────────────
 
 function updateShift(id,field,value){
   const s=DB.shifts.find(x=>x.id===id);if(!s)return;
