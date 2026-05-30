@@ -551,6 +551,7 @@ textarea.form-control { resize: vertical; min-height: 80px; }
         <a href="#" class="nav-item" data-page="legal"><i class="fa fa-scale-balanced"></i> Convenio laboral</a>
         <a href="#" class="nav-item" data-page="costs"><i class="fa fa-sliders"></i> Costes fijos</a>
         <a href="#" class="nav-item" data-page="objectives"><i class="fa fa-bullseye"></i> Objetivos</a>
+        <a href="#" class="nav-item" data-page="users"><i class="fa fa-user-shield"></i> Usuarios y permisos</a>
         <a href="#" class="nav-item" data-page="importer"><i class="fa fa-file-import"></i> Importar Excel</a>
       </div>
     </nav>
@@ -644,10 +645,10 @@ const JMAP = {
 const DB = {
   currentUser: null,
   users:[
-    {id:1,name:'Administrador',role:'admin',    user:'admin',    pass:'1234',avatar:'A'},
-    {id:2,name:'Gerente',      role:'gerente',  user:'gerente',  pass:'1234',avatar:'G'},
-    {id:3,name:'Encargado',    role:'encargado',user:'encargado',pass:'1234',avatar:'E'},
-    {id:4,name:'Solo Lectura', role:'reader',   user:'reader',   pass:'1234',avatar:'R'},
+    {id:1,name:'Administrador',role:'admin',    user:'admin',    pass:'1234',avatar:'A',mustChange:false},
+    {id:2,name:'Gerente',      role:'gerente',  user:'gerente',  pass:'1234',avatar:'G',mustChange:true},
+    {id:3,name:'Encargado',    role:'encargado',user:'encargado',pass:'1234',avatar:'E',mustChange:true},
+    {id:4,name:'Solo Lectura', role:'reader',   user:'reader',   pass:'1234',avatar:'R',mustChange:true},
   ],
   employees:[
     {id:1, name:'Fátima Embark',          type:'full',wh:40,hc:9.25,mc:1603,sick:0,active:true,notes:'',fs:[]},
@@ -673,12 +674,18 @@ const DB = {
   legal:{maxW:40,maxD:9,minR:12,minWR:36,maxC:6,vac:30},
   fixedCosts:Object.entries(FIXED_COSTS).map((e,i)=>({id:i+1,name:e[0],amount:e[1],active:true})),
   obj:{laborPct:30,minSales:1200,sph:45},
-  shifts:[],vacations:[],salesHistory:[],bankMovements:[],jibbleData:[],_log:[],stockItems:[],stockOrders:[],stockSnapshots:[],
+  shifts:[],vacations:[],salesHistory:[],bankMovements:[],jibbleData:[],_log:[],auditLog:[],stockItems:[],stockOrders:[],stockSnapshots:[],
   planConfig:{
     rules:{1:{c:4,n:4,p:2},2:{c:4,n:4,p:2},3:{c:5,n:8,p:5},4:{c:5,n:8,p:5},5:{c:4,n:6,p:4},6:{c:5,n:9,p:5},0:{c:6,n:7,p:6}},
     shifts:{comida:{start:'10:00',end:'18:30'},cena:{start:'19:00',end:'01:30'},partido1:{start:'12:00',end:'16:00'},partido2:{start:'20:00',end:'00:30'}},
     noCoincide:[[1,2]],
     encargados:[1,2]
+  },
+  rolePerms:{
+    admin:    ['dashboard','alerts','employees','shifts','schedule','scheduleConfig','vacations','sales','bank','profit','results','legal','costs','objectives','importer','forecast','jibble','reports','stocks','stockOrder','users'],
+    gerente:  ['dashboard','alerts','employees','shifts','schedule','scheduleConfig','vacations','sales','bank','profit','results','legal','costs','objectives','importer','forecast','jibble','reports','stocks','stockOrder'],
+    encargado:['dashboard','alerts','employees','shifts','schedule','vacations','stocks','stockOrder','jibble'],
+    reader:   ['dashboard','sales','results','jibble']
   },
   alerts:[
     {id:1,sev:'error',msg:'Linda Katerine Martínez — baja médica activa.',done:false},
@@ -704,7 +711,7 @@ const _store = {
     const p = JSON.parse(raw);
     const keys = ['employees','shifts','vacations','alerts','bankMovements',
                   'fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory',
-                  'stockItems','stockOrders','stockSnapshots','planConfig'];
+                  'stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog'];
     keys.forEach(k => { if (p[k] !== undefined) DB[k] = p[k]; });
   } catch(e) { console.warn('Load error:', e); }
 })();
@@ -734,7 +741,7 @@ function save() {
     const p = {};
     ['employees','shifts','vacations','alerts','bankMovements','fixedCosts',
      'obj','legal','conv','jibbleData','_log','salesHistory',
-     'stockItems','stockOrders','stockSnapshots','planConfig'].forEach(k=>{p[k]=DB[k];});
+     'stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog'].forEach(k=>{p[k]=DB[k];});
     p._t = new Date().toISOString();
     _store.setItem('biconcepto_v3', JSON.stringify(p));
   } catch(e) {}
@@ -761,6 +768,15 @@ function showR(id,ok,msg,detail){
 
 function logImp(type,n,ok){DB._log.push({ts:new Date().toLocaleString('es-ES'),type,records:n,ok});save();}
 
+// ── AUDITORÍA ────────────────────────────────────────────────
+function audit(action, detail){
+  if(!DB.auditLog) DB.auditLog=[];
+  const who=DB.currentUser?DB.currentUser.name:'Sistema';
+  const ts=new Date().toLocaleString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  DB.auditLog.unshift({ts, who, action, detail});
+  if(DB.auditLog.length>500) DB.auditLog=DB.auditLog.slice(0,500); // máx 500 entradas
+}
+
 // ═══════════════════════════════════════════════════════════
 // 4. AUTH
 // ═══════════════════════════════════════════════════════════
@@ -770,19 +786,63 @@ function doLogin(){
     const user=DB.users.find(x=>x.user===u&&x.pass===p);
     if(!user){alert('Usuario o contraseña incorrectos');return;}
     DB.currentUser=user;
-    $('loginScreen').classList.add('hidden');
-    $('app').classList.remove('hidden');
-    $('userName').textContent=user.name;
-    $('userRole').textContent=user.role[0].toUpperCase()+user.role.slice(1);
-    $('userAvatar').textContent=user.avatar;
-    updateBadge();
-    setupNav();
-    checkStockAlarm();
-    go('dashboard');
+    // Si es la primera vez o el admin ha forzado cambio de contraseña
+    if(user.mustChange){
+      $('loginScreen').classList.add('hidden');
+      $('app').classList.remove('hidden');
+      forceChangePassMdl(user);
+      return;
+    }
+    audit('login',`Inicio de sesión`);
+    launchApp();
   } catch(e) {
     console.error('❌ Error en doLogin:', e);
     alert('Error al entrar: ' + e.message);
   }
+}
+
+function launchApp(){
+  const user=DB.currentUser;
+  $('loginScreen').classList.add('hidden');
+  $('app').classList.remove('hidden');
+  $('userName').textContent=user.name;
+  $('userRole').textContent=user.role[0].toUpperCase()+user.role.slice(1);
+  $('userAvatar').textContent=user.avatar;
+  updateBadge();
+  setupNav();
+  checkStockAlarm();
+  go('dashboard');
+}
+
+function forceChangePassMdl(user){
+  modal(`<div class="modal" style="max-width:380px">
+    <div class="modal-header"><h3 class="modal-title"><i class="fa fa-key"></i> Cambia tu contraseña</h3></div>
+    <div class="modal-body">
+      <div style="background:rgba(79,124,255,.1);border:1px solid rgba(79,124,255,.3);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--accent);margin-bottom:14px">
+        <i class="fa fa-circle-info"></i> Por seguridad debes establecer una contraseña personal antes de continuar.
+      </div>
+      <label style="font-size:12px;color:var(--text3)">Nueva contraseña (mín. 6 caracteres)</label>
+      <input type="password" id="fcPass1" placeholder="Nueva contraseña" style="width:100%;margin:6px 0 10px;padding:9px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;box-sizing:border-box">
+      <label style="font-size:12px;color:var(--text3)">Confirmar contraseña</label>
+      <input type="password" id="fcPass2" placeholder="Repite la contraseña" style="width:100%;margin:6px 0 0;padding:9px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;box-sizing:border-box">
+      <div id="fcPassErr" style="color:var(--red);font-size:12px;margin-top:6px;display:none"></div>
+    </div>
+    <div class="modal-footer" style="display:flex;justify-content:flex-end">
+      <button class="btn btn-primary" onclick="confirmForcePass()"><i class="fa fa-check"></i> Establecer contraseña</button>
+    </div>
+  </div>`);
+}
+
+function confirmForcePass(){
+  const p1=$('fcPass1').value, p2=$('fcPass2').value;
+  const err=$('fcPassErr');
+  if(p1.length<6){err.textContent='Mínimo 6 caracteres';err.style.display='block';return;}
+  if(p1!==p2){err.textContent='Las contraseñas no coinciden';err.style.display='block';return;}
+  const u=DB.users.find(x=>x.id===DB.currentUser.id);
+  u.pass=p1; u.mustChange=false;
+  save(); closeModal();
+  audit('pass_change','Contraseña establecida en primer acceso');
+  launchApp();
 }
 function quickLogin(r){$('loginUser').value={admin:'admin',gerente:'gerente',encargado:'encargado'}[r]||r;$('loginPass').value='1234';doLogin();}
 function doLogout(){DB.currentUser=null;$('app').classList.add('hidden');$('loginScreen').classList.remove('hidden');}
@@ -800,13 +860,40 @@ function closeSidebar(){
   document.getElementById('sidebarOverlay').classList.remove('open');
 }
 
+function canAccess(page){
+  if(!DB.currentUser)return false;
+  const role=DB.currentUser.role;
+  if(role==='admin')return true;
+  const perms=DB.rolePerms&&DB.rolePerms[role];
+  if(!perms)return false;
+  return perms.includes(page);
+}
+
 function setupNav(){
+  const role=DB.currentUser?DB.currentUser.role:'reader';
+  // Mostrar/ocultar items del nav según permisos
+  document.querySelectorAll('.nav-item[data-page]').forEach(a=>{
+    const page=a.dataset.page;
+    if(canAccess(page)){
+      a.style.display='';
+    } else {
+      a.style.display='none';
+    }
+  });
+  // Ocultar secciones vacías del nav
+  document.querySelectorAll('.nav-section').forEach(sec=>{
+    const visible=[...sec.querySelectorAll('.nav-item[data-page]')].some(a=>a.style.display!=='none');
+    sec.style.display=visible?'':'none';
+  });
+
   document.querySelectorAll('.nav-item[data-page]').forEach(a=>{
     a.addEventListener('click',function(e){
       e.preventDefault();
+      const page=this.dataset.page;
+      if(!canAccess(page)){flash('⚠ Sin permisos para acceder a esta sección');return;}
       document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'));
       this.classList.add('active');
-      go(this.dataset.page);
+      go(page);
       closeSidebar();
     });
   });
@@ -815,6 +902,7 @@ function setupNav(){
 // ADD A PAGE: (1) write pgXxx() + afXxx() below, (2) add entry here
 const PAGES = {
   scheduleConfig:[pgScheduleConfig, null        ],
+  users:      [pgUsers,        null        ],
   stocks:     [pgStocks,     null        ],
   stockOrder: [pgStockOrder, null        ],
   dashboard:  [pgDashboard,  afDashboard ],
@@ -837,6 +925,11 @@ const PAGES = {
 };
 
 function go(page){
+  if(DB.currentUser && !canAccess(page) && page!=='dashboard'){
+    const pc=$('pageContent');
+    if(pc) pc.innerHTML=`<div class="page-body"><div class="alert-item warning" style="margin:16px"><i class="fa fa-lock alert-icon"></i><div class="alert-msg">Sin permisos para acceder a esta sección.</div></div></div>`;
+    return;
+  }
   const pc=$('pageContent');
   if(!PAGES[page]){console.warn('Unknown page:',page);return;}
   const [fn,af]=PAGES[page];
@@ -950,6 +1043,7 @@ function saveShift(){
   const empId=parseInt($('sEmp').value),date=$('sDate').value,start=$('sStart').value,end=$('sEnd').value;
   const emp=DB.employees.find(e=>e.id===empId); if(!emp)return;
   DB.shifts.push({id:maxId(DB.shifts),employee_id:empId,date,start,end,cost:parseFloat((hrsOf(start,end)*emp.hc).toFixed(2)),status:'confirmed'});
+  audit('turno_añadido',`${emp.name} — ${date} ${start}-${end}`);
   save();flash();closeModal();
   if($('calDetail'))go('schedule'); else go('shifts');
 }
@@ -1307,6 +1401,7 @@ function autoplanMonth(y, m){
   }
 
   save();
+  audit('autoplan',`Planificación automática ${y}-${String(m).padStart(2,'0')}: ${added} turnos`);
   const warnTxt=warnings.length>0?`\n⚠ ${warnings.length} días con cobertura incompleta`:'';
   flash(`✓ ${added} turnos generados${warnTxt}`);
   if(warnings.length>0)console.warn('Cobertura incompleta:',warnings);
@@ -1391,9 +1486,12 @@ function autoplanMdl(){
 
 function updateShift(id,field,value){
   const s=DB.shifts.find(x=>x.id===id);if(!s)return;
+  const oldVal=s[field];
   s[field]=field==='employee_id'?parseInt(value):value;
   const emp=DB.employees.find(x=>x.id===s.employee_id);
   if(emp)s.cost=parseFloat((hrsOf(s.start,s.end)*emp.hc).toFixed(2));
+  const fieldLabel={employee_id:'empleado',start:'entrada',end:'salida'}[field]||field;
+  audit('turno_modificado',`${s.date}: ${fieldLabel} cambiado → ${field==='employee_id'?(emp?emp.name:value):value}`);
   save();
   // Refresh cost display without full re-render
   const ds=s.date;
@@ -1403,7 +1501,10 @@ function updateShift(id,field,value){
 }
 
 function deleteShift(id,ds){
+  const s=DB.shifts.find(x=>x.id===id);
+  const emp=s?DB.employees.find(e=>e.id===s.employee_id):null;
   DB.shifts=DB.shifts.filter(x=>x.id!==id);
+  audit('turno_eliminado',`${emp?emp.name:'?'} — ${s?s.date:''} ${s?s.start:''}-${s?s.end:''}`);
   save();
   calClick(ds);
   go('schedule');
@@ -2283,6 +2384,268 @@ function parseLogirestText(text, filename){
 }
 
 // ── Página principal de Stocks ───────────────────────────
+// ── USUARIOS Y PERMISOS ──────────────────────────────────────
+const ALL_PAGES = [
+  {id:'dashboard',    label:'Dashboard',         icon:'fa-chart-line'},
+  {id:'alerts',       label:'Alertas',            icon:'fa-bell'},
+  {id:'employees',    label:'Empleados',          icon:'fa-users'},
+  {id:'shifts',       label:'Turnos',             icon:'fa-calendar-days'},
+  {id:'schedule',     label:'Cuadrante',          icon:'fa-table-cells'},
+  {id:'scheduleConfig',label:'Config. turnos',    icon:'fa-sliders'},
+  {id:'vacations',    label:'Vacaciones',         icon:'fa-umbrella-beach'},
+  {id:'sales',        label:'Ventas',             icon:'fa-cash-register'},
+  {id:'bank',         label:'Banco',              icon:'fa-building-columns'},
+  {id:'profit',       label:'Beneficio diario',   icon:'fa-circle-dollar-to-slot'},
+  {id:'results',      label:'Cuenta resultados',  icon:'fa-file-invoice-dollar'},
+  {id:'jibble',       label:'Plan. vs Real',      icon:'fa-user-clock'},
+  {id:'stocks',       label:'Stocks',             icon:'fa-boxes-stacking'},
+  {id:'stockOrder',   label:'Pedido sugerido',    icon:'fa-cart-plus'},
+  {id:'forecast',     label:'Previsión ventas',   icon:'fa-chart-mixed'},
+  {id:'reports',      label:'Informes',           icon:'fa-file-chart-column'},
+  {id:'legal',        label:'Convenio laboral',   icon:'fa-scale-balanced'},
+  {id:'costs',        label:'Costes fijos',       icon:'fa-sliders'},
+  {id:'objectives',   label:'Objetivos',          icon:'fa-bullseye'},
+  {id:'importer',     label:'Importar Excel',     icon:'fa-file-import'},
+  {id:'users',        label:'Usuarios y permisos',icon:'fa-user-shield'},
+];
+
+const ROLES = ['gerente','encargado','reader'];
+const ROLE_LABELS = {gerente:'Gerente', encargado:'Encargado', reader:'Solo lectura'};
+
+function pgUsers(){
+  if(!DB.currentUser||DB.currentUser.role!=='admin') return `<div class="page-body"><div class="alert-item warning" style="margin:16px"><i class="fa fa-lock alert-icon"></i><div class="alert-msg">Solo el administrador puede gestionar usuarios y permisos.</div></div></div>`;
+  if(!DB.rolePerms) DB.rolePerms={gerente:[],encargado:[],reader:[]};
+
+  // Tabla de usuarios
+  const userRows=DB.users.map(u=>`
+    <tr>
+      <td><div style="display:flex;align-items:center;gap:8px">
+        <div style="width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:13px">${u.avatar}</div>
+        <span style="font-weight:500">${u.name}</span>
+      </div></td>
+      <td><code style="background:var(--bg3);padding:2px 8px;border-radius:4px;font-size:12px">${u.user}</code></td>
+      <td>
+        <select style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px"
+          onchange="changeUserRole(${u.id},this.value)" ${u.role==='admin'?'disabled':''}>
+          <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
+          <option value="gerente" ${u.role==='gerente'?'selected':''}>Gerente</option>
+          <option value="encargado" ${u.role==='encargado'?'selected':''}>Encargado</option>
+          <option value="reader" ${u.role==='reader'?'selected':''}>Solo lectura</option>
+        </select>
+      </td>
+      <td>
+        ${u.mustChange
+          ?'<span style="font-size:11px;color:var(--amber);background:rgba(245,158,11,.1);padding:2px 8px;border-radius:10px"><i class="fa fa-triangle-exclamation"></i> Debe cambiar contraseña</span>'
+          :'<span style="font-size:11px;color:var(--teal)"><i class="fa fa-circle-check"></i> Activo</span>'
+        }
+      </td>
+      <td style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="changePassMdl(${u.id})"><i class="fa fa-key"></i> Contraseña</button>
+        <button class="btn btn-secondary btn-sm" onclick="forceResetPass(${u.id})" title="Forzar cambio en próximo acceso"><i class="fa fa-rotate"></i> Forzar reset</button>
+        ${u.role!=='admin'?`<button class="btn btn-danger btn-sm btn-icon" onclick="deleteUser(${u.id})" title="Eliminar usuario"><i class="fa fa-trash"></i></button>`:''}
+      </td>
+    </tr>`).join('');
+
+  // Matriz de permisos por rol
+  const permMatrix=ROLES.map(role=>{
+    const perms=DB.rolePerms[role]||[];
+    const cols=ALL_PAGES.map(p=>`
+      <td style="text-align:center;padding:6px 4px">
+        <input type="checkbox" ${p.id==='dashboard'?'checked disabled':perms.includes(p.id)?'checked':''}
+          style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent)"
+          onchange="togglePerm('${role}','${p.id}',this.checked)">
+      </td>`).join('');
+    return`<tr>
+      <td style="font-weight:600;padding:8px 12px;white-space:nowrap;color:var(--text)">${ROLE_LABELS[role]}</td>
+      ${cols}
+    </tr>`;
+  }).join('');
+
+  const pageHeaders=ALL_PAGES.map(p=>`
+    <th style="padding:6px 4px;text-align:center;font-size:10px;color:var(--text3);white-space:nowrap;writing-mode:vertical-rl;transform:rotate(180deg);height:80px;vertical-align:bottom">
+      <i class="fa ${p.icon}" style="font-size:9px"></i> ${p.label}
+    </th>`).join('');
+
+  return`<div class="page-header">
+    <div><h2><i class="fa fa-user-shield"></i> Usuarios y permisos</h2>
+    <p>Solo el administrador puede modificar estos ajustes</p></div>
+  </div>
+  <div class="page-body" style="display:flex;flex-direction:column;gap:16px">
+
+    <!-- Usuarios -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title"><i class="fa fa-users"></i> Cuentas de acceso</span>
+        <button class="btn btn-primary btn-sm" onclick="newUserMdl()"><i class="fa fa-plus"></i> Nuevo usuario</button>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead>
+        <tbody>${userRows}</tbody>
+      </table></div>
+    </div>
+
+    <!-- Matriz de permisos -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title"><i class="fa fa-table"></i> Permisos por rol</span>
+        <span style="font-size:11px;color:var(--text3)">Dashboard siempre visible. Admin tiene acceso total.</span>
+      </div>
+      <div class="table-wrap" style="overflow-x:auto">
+        <table style="min-width:800px">
+          <thead><tr>
+            <th style="padding:8px 12px;text-align:left;min-width:110px">Rol</th>
+            ${pageHeaders}
+          </tr></thead>
+          <tbody>${permMatrix}</tbody>
+        </table>
+      </div>
+    </div>
+
+    </div>
+
+    <!-- Log de auditoría -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title"><i class="fa fa-clock-rotate-left"></i> Auditoría de cambios</span>
+        <span style="font-size:11px;color:var(--text3)">${(DB.auditLog||[]).length} registros</span>
+      </div>
+      ${!(DB.auditLog||[]).length
+        ?'<div style="padding:16px;color:var(--text3);font-size:13px">Sin registros todavía.</div>'
+        :`<div class="table-wrap"><table>
+          <thead><tr><th style="white-space:nowrap">Fecha/Hora</th><th>Usuario</th><th>Acción</th><th>Detalle</th></tr></thead>
+          <tbody>${(DB.auditLog||[]).slice(0,200).map(e=>{
+            const icons={login:'fa-right-to-bracket',turno_añadido:'fa-calendar-plus',turno_eliminado:'fa-calendar-xmark',turno_modificado:'fa-calendar-pen',autoplan:'fa-wand-magic-sparkles',stock_añadido:'fa-box',stock_modificado:'fa-box-open',pass_change:'fa-key',pass_reset:'fa-rotate',usuario_creado:'fa-user-plus',usuario_eliminado:'fa-user-minus',rol_cambiado:'fa-user-gear'};
+            const colors={turno_eliminado:'var(--red)',turno_añadido:'var(--teal)',autoplan:'var(--accent)',stock_añadido:'var(--teal)',stock_modificado:'var(--amber)',usuario_eliminado:'var(--red)',usuario_creado:'var(--teal)'};
+            return'<tr>'
+              +'<td class="td-mono" style="font-size:11px;color:var(--text3);white-space:nowrap">'+e.ts+'</td>'
+              +'<td style="font-weight:500;font-size:12px">'+e.who+'</td>'
+              +'<td><span style="font-size:11px;color:'+(colors[e.action]||'var(--text3)')+'"><i class="fa '+(icons[e.action]||'fa-circle')+'"></i> '+e.action.replace(/_/g,' ')+'</span></td>'
+              +'<td style="font-size:12px;color:var(--text2)">'+(e.detail||'')+'</td>'
+              +'</tr>';
+          }).join('')}
+          </tbody></table></div>`
+      }
+    </div>
+
+  </div>`;
+}
+
+function changeUserRole(userId, newRole){
+  const u=DB.users.find(x=>x.id===userId);
+  if(!u||u.role==='admin')return;
+  const oldRole=u.role;
+  u.role=newRole;
+  audit('rol_cambiado',`${u.name}: ${oldRole} → ${newRole}`);
+  save(); flash(`✓ Rol de ${u.name} actualizado a ${newRole}`);
+}
+
+function togglePerm(role, page, enabled){
+  if(!DB.rolePerms)DB.rolePerms={};
+  if(!DB.rolePerms[role])DB.rolePerms[role]=[];
+  if(enabled){
+    if(!DB.rolePerms[role].includes(page))DB.rolePerms[role].push(page);
+  } else {
+    DB.rolePerms[role]=DB.rolePerms[role].filter(p=>p!==page);
+  }
+  save();
+}
+
+function changePassMdl(userId){
+  const u=DB.users.find(x=>x.id===userId);
+  if(!u)return;
+  modal(`<div class="modal" style="max-width:340px">
+    <div class="modal-header"><h3 class="modal-title"><i class="fa fa-key"></i> Cambiar contraseña — ${u.name}</h3></div>
+    <div class="modal-body">
+      <label style="font-size:12px;color:var(--text3)">Nueva contraseña</label>
+      <input type="password" id="newPass1" placeholder="Nueva contraseña" style="width:100%;margin:6px 0 10px;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;box-sizing:border-box">
+      <label style="font-size:12px;color:var(--text3)">Confirmar contraseña</label>
+      <input type="password" id="newPass2" placeholder="Repetir contraseña" style="width:100%;margin:6px 0 0;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;box-sizing:border-box">
+    </div>
+    <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveNewPass(${userId})"><i class="fa fa-check"></i> Guardar</button>
+    </div>
+  </div>`);
+}
+
+function saveNewPass(userId){
+  const p1=$('newPass1').value, p2=$('newPass2').value;
+  if(!p1){alert('Introduce una contraseña');return;}
+  if(p1!==p2){alert('Las contraseñas no coinciden');return;}
+  if(p1.length<4){alert('Mínimo 4 caracteres');return;}
+  const u=DB.users.find(x=>x.id===userId);
+  if(!u)return;
+  u.pass=p1; u.mustChange=false;
+  audit('pass_change',`Contraseña de ${u.name} cambiada por ${DB.currentUser.name}`);
+  save(); closeModal(); flash(`✓ Contraseña de ${u.name} actualizada`);
+}
+
+function forceResetPass(userId){
+  const u=DB.users.find(x=>x.id===userId);
+  if(!u||u.role==='admin')return;
+  u.mustChange=true;
+  audit('pass_reset',`Reset forzado para ${u.name}`);
+  save(); flash(`✓ ${u.name} deberá cambiar su contraseña en el próximo acceso`);
+  go('users');
+}
+
+function deleteUser(userId){
+  const u=DB.users.find(x=>x.id===userId);
+  if(!u||u.role==='admin'){alert('No se puede eliminar el administrador');return;}
+  if(!confirm(`¿Eliminar usuario "${u.name}"? Esta acción no se puede deshacer.`))return;
+  DB.users=DB.users.filter(x=>x.id!==userId);
+  audit('usuario_eliminado',`${u.name} (${u.user})`);
+  save(); flash(`✓ Usuario ${u.name} eliminado`); go('users');
+}
+
+function newUserMdl(){
+  modal(`<div class="modal" style="max-width:400px">
+    <div class="modal-header"><h3 class="modal-title"><i class="fa fa-user-plus"></i> Nuevo usuario</h3></div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:10px">
+      <div>
+        <label style="font-size:12px;color:var(--text3)">Nombre completo</label>
+        <input type="text" id="nuName" placeholder="Ej: María García" style="width:100%;margin-top:4px;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;box-sizing:border-box">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text3)">Usuario (para el login)</label>
+        <input type="text" id="nuUser" placeholder="Ej: mgarcia" style="width:100%;margin-top:4px;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;box-sizing:border-box">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text3)">Contraseña inicial (el usuario deberá cambiarla)</label>
+        <input type="password" id="nuPass" placeholder="Mínimo 4 caracteres" style="width:100%;margin-top:4px;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;box-sizing:border-box">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text3)">Rol</label>
+        <select id="nuRole" style="width:100%;margin-top:4px;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px">
+          <option value="gerente">Gerente</option>
+          <option value="encargado" selected>Encargado</option>
+          <option value="reader">Solo lectura</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="createUser()"><i class="fa fa-check"></i> Crear usuario</button>
+    </div>
+  </div>`);
+}
+
+function createUser(){
+  const name=$('nuName').value.trim();
+  const user=$('nuUser').value.trim().toLowerCase();
+  const pass=$('nuPass').value;
+  const role=$('nuRole').value;
+  if(!name||!user||!pass){alert('Rellena todos los campos');return;}
+  if(pass.length<4){alert('Contraseña mínimo 4 caracteres');return;}
+  if(DB.users.find(x=>x.user===user)){alert('Ese nombre de usuario ya existe');return;}
+  const avatar=name[0].toUpperCase();
+  const newUser={id:maxId(DB.users),name,user,pass,role,avatar,mustChange:true};
+  DB.users.push(newUser);
+  audit('usuario_creado',`${name} (${user}) — rol: ${role}`);
+  save(); closeModal(); flash(`✓ Usuario ${name} creado`); go('users');
+}
+// ─────────────────────────────────────────────────────────────
+
 function pgScheduleConfig(){
   const cfg=getPlanConfig();
   const r=cfg.rules;
@@ -2529,8 +2892,14 @@ function stockItemMdl(id){
 function saveStockItem(id){
   const n=document.getElementById('siN').value.trim();if(!n){alert('Introduce nombre');return;}
   const data={name:n,ref:document.getElementById('siR').value.trim(),unit:document.getElementById('siU').value||'ud',currentStock:parseFloat(document.getElementById('siCS').value)||0,minStock:parseFloat(document.getElementById('siMS').value)||0,targetStock:parseFloat(document.getElementById('siTS').value)||0};
-  if(id&&id!==null){const it=DB.stockItems.find(x=>x.id===id);if(it)Object.assign(it,data);}
-  else{data.id=maxId(DB.stockItems);data.orders=[];data.avgConsumption=0;data._cat='general';DB.stockItems.push(data);}
+  if(id&&id!==null){
+    const it=DB.stockItems.find(x=>x.id===id);
+    if(it){Object.assign(it,data);audit('stock_modificado',`${n}`);}
+  } else {
+    data.id=maxId(DB.stockItems);data.orders=[];data.avgConsumption=0;data._cat='general';
+    DB.stockItems.push(data);
+    audit('stock_añadido',`${n}`);
+  }
   save();flash();closeModal();go('stocks');
 }
 
@@ -2560,6 +2929,7 @@ function saveStockSnapshot(){
     if(it)it.currentStock=val;
   });
   DB.stockSnapshots.push({month:key,date:today(),entries});
+  audit('stock_inventario',`Inventario real guardado — ${Object.keys(entries).length} artículos`);
   // Resolver alarma mensual
   DB.alerts.forEach(a=>{if(a._sk===key)a.done=true;});
   save();flash('Inventario guardado');updateBadge();closeModal();go('stocks');
@@ -2646,14 +3016,14 @@ function pgReports(){
 // ═══════════════════════════════════════════════════════════
 function exportBackup(){
   try{
-    const p={};['employees','shifts','vacations','alerts','bankMovements','fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory','stockItems','stockOrders','stockSnapshots','planConfig'].forEach(k=>{p[k]=DB[k];});
+    const p={};['employees','shifts','vacations','alerts','bankMovements','fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory','stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog'].forEach(k=>{p[k]=DB[k];});
     p._v='biconcepto_v3';p._t=new Date().toISOString();
     const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(p,null,2)],{type:'application/json'}));a.download='backup_biconcepto_'+today()+'.json';a.click();
   }catch(e){alert('Error: '+e.message);}
 }
 function importBackup(){
   const inp=document.createElement('input');inp.type='file';inp.accept='.json';
-  inp.onchange=e=>{const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p._v){alert('Archivo no válido');return;}['employees','shifts','vacations','alerts','bankMovements','fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory','stockItems','stockOrders','stockSnapshots','planConfig'].forEach(k=>{if(p[k]!==undefined)DB[k]=p[k];});save();location.reload();}catch(err){alert('Error: '+err.message);}};r.readAsText(e.target.files[0]);};inp.click();
+  inp.onchange=e=>{const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p._v){alert('Archivo no válido');return;}['employees','shifts','vacations','alerts','bankMovements','fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory','stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog'].forEach(k=>{if(p[k]!==undefined)DB[k]=p[k];});save();location.reload();}catch(err){alert('Error: '+err.message);}};r.readAsText(e.target.files[0]);};inp.click();
 }
 function clearStorage(){if(!confirm('¿Borrar TODOS los datos?\n\nNo se puede deshacer.'))return;_store.removeItem('biconcepto_v3');location.reload();}
 
