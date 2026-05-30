@@ -990,20 +990,90 @@ function afDashboard(){
 
 // ─── EMPLOYEES ──────────────────────────────────────────────
 function pgEmployees(){
+  const DOW=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
   return`<div class="page-header"><div><h2>Empleados</h2><p>${DB.employees.length} · ${DB.employees.filter(e=>e.sick>0).length} de baja</p></div><div class="page-actions"><button class="btn btn-primary" onclick="empMdl()"><i class="fa fa-plus"></i> Nuevo</button></div></div>
   <div class="page-body"><div class="card"><div class="table-wrap"><table>
-    <thead><tr><th>Nombre</th><th>Jornada</th><th>€/h</th><th>€/mes</th><th>Notas</th><th>Estado</th><th></th></tr></thead>
-    <tbody>${DB.employees.map(e=>`<tr><td class="td-bold">${e.name}</td><td><span class="badge badge-${e.type==='full'?'blue':'amber'}">${e.wh}h</span></td><td class="td-mono">${e.hc}€</td><td class="td-mono">${eur(e.mc)}</td><td style="font-size:11px;color:var(--text2)">${e.notes||'—'}</td><td>${e.sick>0?'<span class="badge badge-red">🏥 Baja</span>':'<span class="badge badge-green">Activo</span>'}</td><td><button class="btn btn-secondary btn-sm btn-icon" onclick="empMdl(${e.id})"><i class="fa fa-pencil"></i></button></td></tr>`).join('')}</tbody>
+    <thead><tr><th>Nombre</th><th>Jornada</th><th>€/h</th><th>€/mes</th><th>Días fijos</th><th>Estado</th><th></th></tr></thead>
+    <tbody>${DB.employees.map(e=>{
+      const fsInfo=e.type==='part'&&e.fs&&e.fs.length
+        ?e.fs.map(f=>`<span style="background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:2px 6px;font-size:10px;font-family:var(--mono);white-space:nowrap">${DOW[f.d]} ${f.s}-${f.e}</span>`).join(' ')
+        :e.type==='part'?'<span style="color:var(--red);font-size:11px">⚠ Sin configurar</span>':'<span style="color:var(--text3);font-size:11px">—</span>';
+      return`<tr>
+        <td class="td-bold">${e.name}</td>
+        <td><span class="badge badge-${e.type==='full'?'blue':'amber'}">${e.wh}h</span></td>
+        <td class="td-mono">${e.hc}€</td>
+        <td class="td-mono">${eur(e.mc)}</td>
+        <td style="display:flex;flex-wrap:wrap;gap:3px">${fsInfo}</td>
+        <td>${e.sick>0?'<span class="badge badge-red">🏥 Baja</span>':'<span class="badge badge-green">Activo</span>'}</td>
+        <td><button class="btn btn-secondary btn-sm btn-icon" onclick="empMdl(${e.id})"><i class="fa fa-pencil"></i></button></td>
+      </tr>`;
+    }).join('')}</tbody>
   </table></div></div></div>`;
 }
 function empMdl(id){
   const e=id?DB.employees.find(x=>x.id===id):null;
-  modal(`<div class="modal">
-    <div class="modal-header"><h3>${e?'Editar':'Nuevo'} empleado</h3><button class="btn-close-modal" onclick="closeModal()"><i class="fa fa-xmark"></i></button></div>
+  const isPart=e&&e.type==='part';
+  const fs=e&&e.fs&&e.fs.length?e.fs:[];
+  const dows=[{v:1,l:'Lunes'},{v:2,l:'Martes'},{v:3,l:'Miércoles'},{v:4,l:'Jueves'},{v:5,l:'Viernes'},{v:6,l:'Sábado'},{v:0,l:'Domingo'}];
+
+  // Construir filas de días fijos actuales
+  function fsRows(slots){
+    if(!slots.length) return '<div style="color:var(--text3);font-size:12px;padding:8px 0">Sin días fijos configurados</div>';
+    return slots.map((f,i)=>`
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px" id="fsRow${i}">
+        <select style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px;flex:1" data-fs-d="${i}">
+          ${dows.map(d=>`<option value="${d.v}"${f.d===d.v?' selected':''}>${d.l}</option>`).join('')}
+        </select>
+        <input type="time" value="${f.s}" data-fs-s="${i}" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-family:var(--mono);font-size:12px">
+        <span style="color:var(--text3)">→</span>
+        <input type="time" value="${f.e}" data-fs-e="${i}" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-family:var(--mono);font-size:12px">
+        <button type="button" class="btn btn-danger btn-sm btn-icon" onclick="removeFsRow(${i})"><i class="fa fa-xmark"></i></button>
+      </div>`).join('');
+  }
+
+  modal(`<div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <h3>${e?'Editar':'Nuevo'} empleado</h3>
+      <button class="btn-close-modal" onclick="closeModal()"><i class="fa fa-xmark"></i></button>
+    </div>
     <div class="modal-body">
-      <div class="form-row"><div class="form-group"><label class="form-label">Nombre</label><input class="form-control" id="eN" value="${e?e.name:''}"></div><div class="form-group"><label class="form-label">Jornada</label><select class="form-control" id="eT"><option value="full" ${!e||e.type==='full'?'selected':''}>40h completa</option><option value="part" ${e&&e.type==='part'?'selected':''}>20h parcial</option></select></div></div>
-      <div class="form-row"><div class="form-group"><label class="form-label">€/hora</label><input type="number" class="form-control" id="eCH" value="${e?e.hc:9.25}" step="0.01"></div><div class="form-group"><label class="form-label">€/mes</label><input type="number" class="form-control" id="eCM" value="${e?e.mc:1603}"></div></div>
-      <div class="form-row"><div class="form-group"><label class="form-label">Estado</label><select class="form-control" id="eS"><option value="a" ${!e||(!e.sick&&e.active)?'selected':''}>✅ Activo</option><option value="s" ${e&&e.sick>0?'selected':''}>🏥 Baja médica</option><option value="i" ${e&&!e.active?'selected':''}>⛔ Inactivo</option></select></div><div class="form-group"><label class="form-label">Notas</label><input class="form-control" id="eObs" value="${e?e.notes||'':''}"></div></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Nombre</label><input class="form-control" id="eN" value="${e?e.name:''}"></div>
+        <div class="form-group">
+          <label class="form-label">Jornada</label>
+          <select class="form-control" id="eT" onchange="toggleFsSection(this.value)">
+            <option value="full" ${!e||e.type==='full'?'selected':''}>40h — Jornada completa</option>
+            <option value="part" ${e&&e.type==='part'?'selected':''}>20h — Jornada parcial</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">€/hora</label><input type="number" class="form-control" id="eCH" value="${e?e.hc:9.25}" step="0.01"></div>
+        <div class="form-group"><label class="form-label">€/mes</label><input type="number" class="form-control" id="eCM" value="${e?e.mc:1603}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Estado</label>
+          <select class="form-control" id="eS">
+            <option value="a" ${!e||(!e.sick&&e.active)?'selected':''}>✅ Activo</option>
+            <option value="s" ${e&&e.sick>0?'selected':''}>🏥 Baja médica</option>
+            <option value="i" ${e&&!e.active?'selected':''}>⛔ Inactivo</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Notas</label><input class="form-control" id="eObs" value="${e?e.notes||'':''}"></div>
+      </div>
+
+      <!-- Sección días fijos (solo parciales) -->
+      <div id="fsSect" style="display:${isPart?'block':'none'};margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <label class="form-label" style="margin:0"><i class="fa fa-calendar-check" style="color:var(--accent)"></i> Días y horarios fijos</label>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="addFsRow()"><i class="fa fa-plus"></i> Añadir día</button>
+        </div>
+        <div id="fsContainer">${fsRows(fs)}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px">
+          <i class="fa fa-circle-info"></i> El autoplanificador asignará a este empleado solo en los días y turnos aquí definidos
+        </div>
+      </div>
     </div>
     <div class="modal-footer">
       ${e?`<button class="btn btn-danger btn-sm" onclick="if(confirm('¿Eliminar?')){DB.employees=DB.employees.filter(x=>x.id!==${e.id});save();closeModal();go('employees')}">Eliminar</button>`:''}
@@ -1011,15 +1081,80 @@ function empMdl(id){
       <button class="btn btn-primary" onclick="saveEmp(${e?e.id:'null'})"><i class="fa fa-check"></i> Guardar</button>
     </div>
   </div>`);
+
+  // Guardar las slots actuales en variable temporal para manipulación
+  window._fsSlots=JSON.parse(JSON.stringify(fs));
 }
+
+function toggleFsSection(val){
+  const s=document.getElementById('fsSect');
+  if(s) s.style.display=val==='part'?'block':'none';
+}
+
+function addFsRow(){
+  window._fsSlots=window._fsSlots||[];
+  window._fsSlots.push({d:1,s:'10:00',e:'18:30'});
+  // Re-renderizar el contenedor
+  const dows=[{v:1,l:'Lunes'},{v:2,l:'Martes'},{v:3,l:'Miércoles'},{v:4,l:'Jueves'},{v:5,l:'Viernes'},{v:6,l:'Sábado'},{v:0,l:'Domingo'}];
+  const cont=document.getElementById('fsContainer');
+  if(!cont)return;
+  cont.innerHTML=window._fsSlots.map((f,i)=>`
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+      <select style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px;flex:1" data-fs-d="${i}">
+        ${dows.map(d=>`<option value="${d.v}"${f.d===d.v?' selected':''}>${d.l}</option>`).join('')}
+      </select>
+      <input type="time" value="${f.s}" data-fs-s="${i}" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-family:var(--mono);font-size:12px">
+      <span style="color:var(--text3)">→</span>
+      <input type="time" value="${f.e}" data-fs-e="${i}" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-family:var(--mono);font-size:12px">
+      <button type="button" class="btn btn-danger btn-sm btn-icon" onclick="removeFsRow(${i})"><i class="fa fa-xmark"></i></button>
+    </div>`).join('');
+}
+
+function removeFsRow(i){
+  window._fsSlots=window._fsSlots||[];
+  window._fsSlots.splice(i,1);
+  addFsRow(); // re-renderiza (reutilizamos la función que redibuja)
+}
+
 function saveEmp(id){
   const n=$('eN').value.trim(); if(!n){alert('Introduce el nombre');return;}
   const type=$('eT').value, st=$('eS').value;
   const hr=hrate();
-  const data={name:n,type,wh:type==='full'?40:20,hc:parseFloat($('eCH').value)||hr,mc:parseInt($('eCM').value)||(type==='full'?Math.round(hr*40*52/12):Math.round(hr*20*52/12)),sick:st==='s'?1:0,active:st!=='i',notes:$('eObs').value,fs:[]};
-  if(id&&id!==null){Object.assign(DB.employees.find(x=>x.id===id),data);}
-  else{data.id=maxId(DB.employees);DB.employees.push(data);}
-  save();flash();closeModal();go('employees');
+
+  // Recoger días fijos si es parcial
+  let fs=[];
+  if(type==='part'){
+    const dSelects=document.querySelectorAll('[data-fs-d]');
+    dSelects.forEach((sel,i)=>{
+      const dow=parseInt(sel.value);
+      const sEl=document.querySelector(`[data-fs-s="${i}"]`);
+      const eEl=document.querySelector(`[data-fs-e="${i}"]`);
+      if(sEl&&eEl&&sEl.value&&eEl.value){
+        fs.push({d:dow, s:sEl.value, e:eEl.value});
+      }
+    });
+  }
+
+  const data={
+    name:n, type,
+    wh:type==='full'?40:20,
+    hc:parseFloat($('eCH').value)||hr,
+    mc:parseInt($('eCM').value)||(type==='full'?Math.round(hr*40*52/12):Math.round(hr*20*52/12)),
+    sick:st==='s'?1:0,
+    active:st!=='i',
+    notes:$('eObs').value,
+    fs
+  };
+
+  if(id&&id!==null){
+    Object.assign(DB.employees.find(x=>x.id===id), data);
+    audit('empleado_editado',`${n} — jornada: ${data.wh}h${fs.length?`, ${fs.length} días fijos`:''}`)
+  } else {
+    data.id=maxId(DB.employees);
+    DB.employees.push(data);
+    audit('empleado_creado',`${n} — jornada: ${data.wh}h`);
+  }
+  save(); flash(); closeModal(); go('employees');
 }
 
 // ─── SHIFTS ─────────────────────────────────────────────────
