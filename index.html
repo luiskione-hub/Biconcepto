@@ -621,13 +621,20 @@ const FULL_PL = {
 };
 
 const HOURLY = {
-  10:{L:0,  M:0,  X:0,  J:0,  V:0,  S:0,  D:0  },11:{L:1,  M:0,  X:0,  J:1,  V:1,  S:0,  D:0  },
-  12:{L:49, M:46, X:60, J:56, V:55, S:81, D:74  },13:{L:166,M:149,X:237,J:199,V:220,S:298,D:308 },
-  14:{L:308,M:253,X:399,J:373,V:433,S:474,D:480 },15:{L:185,M:139,X:235,J:220,V:265,S:319,D:291 },
-  16:{L:87, M:64, X:105,J:99, V:124,S:166,D:144 },17:{L:89, M:68, X:106,J:99, V:122,S:179,D:145 },
-  18:{L:114,M:84, X:134,J:126,V:164,S:232,D:181 },19:{L:136,M:100,X:162,J:155,V:202,S:289,D:219 },
-  20:{L:175,M:130,X:208,J:197,V:261,S:374,D:292 },21:{L:223,M:162,X:263,J:253,V:341,S:478,D:364 },
-  22:{L:291,M:275,X:369,J:408,V:543,S:604,D:395 },23:{L:73, M:69, X:124,J:92, V:234,S:262,D:102 },
+  10:{L:0,  M:0,  X:0,  J:0,  V:0,  S:0,  D:0  },
+  11:{L:0,  M:0,  X:10, J:5,  V:2,  S:8,  D:6  },
+  12:{L:32, M:28, X:62, J:59, V:63, S:132,D:70  },
+  13:{L:166,M:146,X:233,J:193,V:267,S:333,D:306 },
+  14:{L:227,M:175,X:399,J:490,V:577,S:409,D:515 },
+  15:{L:149,M:131,X:245,J:286,V:288,S:161,D:241 },
+  16:{L:92, M:23, X:198,J:162,V:109,S:274,D:71  },
+  17:{L:58, M:55, X:132,J:134,V:72, S:158,D:71  },
+  18:{L:93, M:68, X:103,J:115,V:83, S:161,D:96  },
+  19:{L:92, M:140,X:264,J:218,V:181,S:204,D:163 },
+  20:{L:246,M:241,X:465,J:395,V:332,S:243,D:256 },
+  21:{L:210,M:309,X:548,J:573,V:719,S:514,D:345 },
+  22:{L:156,M:137,X:326,J:320,V:606,S:556,D:330 },
+  23:{L:28, M:31, X:80, J:58, V:177,S:245,D:76  },
 };
 
 const JMAP = {
@@ -728,7 +735,91 @@ const sDay  = ds => ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][new Date(ds).g
 const eur   = n  => new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR',minimumFractionDigits:0}).format(n||0);
 const salesOn = ds => DB.salesHistory.filter(s=>s.date===ds).reduce((a,s)=>a+(s.amount||0),0);
 const laborOn = ds => DB.shifts.filter(s=>s.date===ds).reduce((a,s)=>a+(s.cost||0),0);
-const estSales= ds => { const d=dk(ds); return Object.values(HOURLY).reduce((a,v)=>a+(v[d]||0),0); };
+
+// estSales: previsión de ventas basada en año anterior + tendencia real
+// Modelo: Previsión = Mismo_día_año_anterior × Factor_tendencia
+// Factor tendencia = (ventas últimas 4 semanas) / (mismas semanas año anterior)
+const estSales = ds => {
+  const dow = new Date(ds).getDay();
+
+  // 1. Buscar el mismo día de semana del año anterior (±3 días para encontrar el lunes más cercano)
+  const dObj = new Date(ds);
+  const lyBase = new Date(dObj);
+  lyBase.setFullYear(lyBase.getFullYear() - 1);
+  // Ajustar al mismo día de semana del año anterior
+  const lyDow = lyBase.getDay();
+  const diffDow = dow - lyDow;
+  lyBase.setDate(lyBase.getDate() + diffDow);
+  const lyDs = lyBase.toISOString().slice(0,10);
+
+  const lyVenta = salesOn(lyDs);
+
+  // 2. Calcular factor de tendencia: últimas 4-8 semanas reales vs mismo período año anterior
+  const t = today();
+  const recentSame = [], recentSameLY = [];
+  for(let w = 1; w <= 8; w++){
+    const dR = new Date(t);
+    dR.setDate(dR.getDate() - w*7);
+    // Ajustar al mismo dow
+    const dRDow = dR.getDay();
+    dR.setDate(dR.getDate() + (dow - dRDow));
+    const dsR = dR.toISOString().slice(0,10);
+    if(dsR >= ds) continue; // no usar días futuros
+
+    const vR = salesOn(dsR);
+    if(vR > 0){
+      recentSame.push(vR);
+      // Mismo día año anterior
+      const dLY = new Date(dR);
+      dLY.setFullYear(dLY.getFullYear() - 1);
+      const dLYDow = dLY.getDay();
+      dLY.setDate(dLY.getDate() + (dow - dLYDow));
+      const dsLY = dLY.toISOString().slice(0,10);
+      const vLY = salesOn(dsLY);
+      if(vLY > 0) recentSameLY.push({actual:vR, ly:vLY});
+    }
+  }
+
+  // 3. Factor tendencia = media(actual/ly) de las semanas con datos en ambos años
+  let factor = 1;
+  if(recentSameLY.length >= 2){
+    factor = recentSameLY.reduce((a,p)=>a + p.actual/p.ly, 0) / recentSameLY.length;
+    // Limitar el factor entre 0.5 y 2.0 para evitar extrapolaciones extremas
+    factor = Math.max(0.5, Math.min(2.0, factor));
+  } else if(recentSame.length >= 2){
+    // Si no hay dato año anterior, usar tendencia lineal de las semanas recientes
+    // Pendiente simple: última semana vs primera del período
+    const last = recentSame[0], first = recentSame[recentSame.length-1];
+    factor = first > 0 ? last/first : 1;
+    factor = Math.max(0.7, Math.min(1.5, factor));
+  }
+
+  // 4. Aplicar factor al año anterior
+  if(lyVenta > 0){
+    return Math.round(lyVenta * factor);
+  }
+
+  // 5. Fallback: media ponderada por día de semana del histórico disponible
+  const mismosDow = DB.salesHistory.filter(s=>{
+    if(!s.date||s.date.length<10||s.date===ds)return false;
+    return new Date(s.date).getDay()===dow;
+  }).sort((a,b)=>b.date.localeCompare(a.date));
+
+  if(mismosDow.length >= 2){
+    // Ponderar más los recientes: peso decreciente
+    let sumPeso = 0, sumVal = 0;
+    mismosDow.slice(0,12).forEach((s,i)=>{
+      const peso = 1/(i+1);
+      sumVal += (s.amount||0)*peso;
+      sumPeso += peso;
+    });
+    return Math.round(sumVal/sumPeso);
+  }
+
+  // 6. Último fallback: HOURLY hardcodeado
+  const d = dk(ds);
+  return Object.values(HOURLY).reduce((a,v)=>a+(v[d]||0),0);
+};
 const hrsOf   = (s,e) => { const sm=parseInt(s)*60+(parseInt(s.split(':')[1])||0), em=parseInt(e)*60+(parseInt(e.split(':')[1])||0); let h=(em-sm)/60; if(h<=0)h+=24; return h; };
 const jName   = n => JMAP[n.trim()]||n.trim();
 const maxId   = arr => arr.reduce((m,x)=>Math.max(m,x.id),0)+1;
