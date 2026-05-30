@@ -380,7 +380,77 @@ textarea.form-control { resize: vertical; min-height: 80px; }
 .sidebar-backup button { flex:1; background:var(--bg3); border:1px solid var(--border2); color:var(--text2); padding:6px 4px; border-radius:6px; font-size:11px; font-weight:500; cursor:pointer; font-family:var(--font); display:flex; align-items:center; justify-content:center; gap:4px; transition:all 0.15s; }
 .sidebar-backup button:hover { background:var(--bg4); color:var(--text); }
 
-/* ── CALENDAR ─────────────────────────────────────────────── */
+/* ── RESPONSIVE ───────────────────────────────────────────── */
+.hamburger { display:none; position:fixed; top:12px; left:12px; z-index:200; background:var(--bg2); border:1px solid var(--border2); color:var(--text); width:40px; height:40px; border-radius:8px; font-size:16px; cursor:pointer; align-items:center; justify-content:center; }
+.sidebar-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:149; }
+
+@media (max-width: 768px) {
+  /* Hamburger visible */
+  .hamburger { display:flex; }
+
+  /* Sidebar oculto por defecto, desliza desde la izquierda */
+  .sidebar {
+    position:fixed; left:-260px; top:0; height:100vh; z-index:150;
+    transition:left 0.25s ease; box-shadow:none;
+  }
+  .sidebar.open { left:0; box-shadow:4px 0 24px rgba(0,0,0,.4); }
+  .sidebar-overlay.open { display:block; }
+
+  /* Main ocupa todo el ancho */
+  .main-content { width:100%; padding-top:0; }
+  #pageContent { padding-top:56px; } /* espacio para hamburger */
+
+  /* Page header en móvil */
+  .page-header { flex-direction:column; gap:10px; padding:12px 14px; }
+  .page-actions { flex-wrap:wrap; gap:6px; }
+  .page-actions .btn { font-size:12px; padding:6px 10px; }
+
+  /* Cards más compactas */
+  .card { border-radius:8px; }
+  .card-header { padding:10px 14px; flex-wrap:wrap; gap:8px; }
+
+  /* Tablas con scroll horizontal */
+  .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  table { min-width:500px; font-size:12px; }
+
+  /* Calendario responsive */
+  .cal-week-row { min-height:70px; }
+  .cal-cell { padding:4px 3px; min-height:70px; }
+  .cal-day-num { font-size:11px; }
+  .cal-shift-pill { font-size:9px; padding:1px 3px; }
+  .cal-cost { font-size:9px; }
+  .cal-header-cell { padding:6px 4px; font-size:10px; }
+
+  /* KPI grid en móvil: 2 columnas */
+  .kpi-grid { grid-template-columns:repeat(2,1fr) !important; gap:8px; }
+  .kpi-card { padding:12px; }
+  .kpi-val { font-size:20px; }
+
+  /* Botones del cuadrante: wrap */
+  .page-header .page-actions { overflow-x:auto; flex-wrap:nowrap; padding-bottom:4px; }
+
+  /* Detalle de día en móvil */
+  #calDetail .card { margin-top:10px; }
+  #calDetail table { min-width:400px; }
+
+  /* Modal más ancho en móvil */
+  .modal { width:95vw !important; max-width:95vw !important; margin:10px; }
+
+  /* Login centrado */
+  .login-box { padding:24px 20px; margin:0 12px; }
+
+  /* Grids de config */
+  .page-body [style*="grid-template-columns"] { grid-template-columns:1fr !important; }
+}
+
+@media (max-width: 480px) {
+  .kpi-grid { grid-template-columns:1fr 1fr !important; }
+  .cal-week-row { min-height:55px; }
+  .cal-cell { min-height:55px; padding:3px 2px; }
+  .cal-shift-pill { display:none; } /* en móvil pequeño solo mostrar número */
+  .cal-cell::after { content:attr(data-count); font-size:10px; color:var(--text3); }
+}
+
 .cal-grid-wrap { background: var(--bg2); }
 .cal-header-row { display:grid; grid-template-columns:repeat(7,1fr); background:var(--bg3); border-bottom:1px solid var(--border); }
 .cal-header-cell { padding:10px 8px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text3); text-align:center; }
@@ -432,6 +502,8 @@ textarea.form-control { resize: vertical; min-height: 80px; }
 
 <!-- APP -->
 <div id="app" class="app hidden">
+  <button class="hamburger" id="hamburger" onclick="toggleSidebar()" aria-label="Menú"><i class="fa fa-bars"></i></button>
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <div class="brand">
@@ -719,6 +791,15 @@ function updateBadge(){const b=$('alertBadge');if(b)b.textContent=DB.alerts.filt
 // ═══════════════════════════════════════════════════════════
 // 5. ROUTER — single source of truth for all pages
 // ═══════════════════════════════════════════════════════════
+function toggleSidebar(){
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebarOverlay').classList.toggle('open');
+}
+function closeSidebar(){
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebarOverlay').classList.remove('open');
+}
+
 function setupNav(){
   document.querySelectorAll('.nav-item[data-page]').forEach(a=>{
     a.addEventListener('click',function(e){
@@ -726,6 +807,7 @@ function setupNav(){
       document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'));
       this.classList.add('active');
       go(this.dataset.page);
+      closeSidebar();
     });
   });
 }
