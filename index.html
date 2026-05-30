@@ -1241,10 +1241,21 @@ function pgSchedule(){
     const isT=ds===t;
     const ds2=mS.filter(s=>s.date===ds);
     const cost=ds2.reduce((a,s)=>a+(s.cost||0),0);
-    const hasTpl=ds2.some(s=>s.status==='template');
+    const nPersonas=new Set(ds2.map(s=>s.employee_id)).size;
+    const ventas=salesOn(ds);
+    const ventasEst=!ventas?Math.round(estSales(ds)):0;
+    // Mostrar: nº personas + coste personal (en amarillo) + ventas reales (verde) o estimadas (azul)
+    const infoLine=ds2.length>0
+      ?`<div style="font-size:9px;color:var(--amber);font-family:var(--mono)">${nPersonas}p · ${eur(cost)}</div>`
+      :'';
+    const ventasLine=ventas>0
+      ?`<div style="font-size:9px;color:var(--green);font-family:var(--mono)">${eur(ventas)}</div>`
+      :ventasEst>0
+        ?`<div style="font-size:9px;color:var(--accent);font-family:var(--mono)">~${eur(ventasEst)}</div>`
+        :'';
     return`<div class="cal-cell${isT?' cal-today':''}" onclick="calClick('${ds}')">
       <div class="cal-day-num${isT?' cal-today-num':''}">${day}</div>
-      ${cost>0?`<div class="cal-cost">${eur(cost)}</div>`:''}
+      ${infoLine}${ventasLine}
       <div class="cal-shifts">
         ${ds2.slice(0,4).map(s=>{
           const e=DB.employees.find(x=>x.id===s.employee_id),c=cm[s.employee_id]||'#4f7cff';
@@ -1468,19 +1479,9 @@ function autoplanMonth(y, m){
     if(existing.length>0)continue;
 
     // ─── Empleados disponibles ese día ───────────────────────
-    const vacas=new Set(DB.vacations.filter(v=>v.start<=ds&&v.end>=ds).map(v=>v.employee_id));
-
-    // Parciales: solo los días que les corresponde por plantilla
-    // Completos: todos los días disponibles
-    const disponibles=DB.employees.filter(e=>{
-      if(!e.active||e.sick>0)return false;
-      if(vacas.has(e.id))return false;
-      if(e.type==='part'&&e.fs&&e.fs.length){
-        // Solo disponible si tiene este dow en su plantilla
-        return e.fs.some(f=>f.d===dow);
-      }
-      return true;
-    });
+    // availableEmps ya filtra: activos, sin baja, sin vacaciones,
+    // y parciales solo en sus días fijos (fs[].d === dow)
+    const disponibles=availableEmps(ds);
 
     // Horas acumuladas en el mes
     const hrsMap={};
@@ -1547,16 +1548,29 @@ function autoplanMonth(y, m){
     }
 
     // ─── 1. PARTIDOS ─────────────────────────────────────────
-    // Primero asignar parciales con fs que incluya partido (12-16)
+    // Parciales con fs que coincida con horario de partido (12:00 start)
     const parcialesPartido=disponibles.filter(e=>{
       if(!e.fs||!e.fs.length)return false;
       return e.fs.some(f=>f.d===dow&&f.s===SH.partido1.start);
     });
+    // Parciales con fs de comida (10:00 start) — van a comida, no a partido
+    const parcialesComida=disponibles.filter(e=>{
+      if(!e.fs||!e.fs.length)return false;
+      return e.fs.some(f=>f.d===dow&&f.s===SH.comida.start);
+    });
+    // Parciales con fs de cena (19:00 start) — van a cena, no a partido
+    const parcialesCena=disponibles.filter(e=>{
+      if(!e.fs||!e.fs.length)return false;
+      return e.fs.some(f=>f.d===dow&&f.s===SH.cena.start);
+    });
+    // Completos y parciales sin fs fijo: pueden ir a cualquier turno
+    const flexibles=disponibles.filter(e=>!e.fs||!e.fs.length);
 
-    // Encargado de partido: solo 1, alternando entre los dos
-    // Usar el que tenga menos horas este mes
+    // Encargado de partido: el con menos horas
     const encPartido=encDisp.sort((a,b)=>(hrsMap[a.id]||0)-(hrsMap[b.id]||0)).slice(0,1);
-    const poolPartido=[...parcialesPartido,...encPartido,...noEnc.filter(e=>!parcialesPartido.find(p=>p.id===e.id))];
+    // Pool partido: parciales de partido + 1 encargado + flexibles (sin duplicar)
+    const idsEnPartidoPool=new Set([...parcialesPartido,...encPartido].map(e=>e.id));
+    const poolPartido=[...parcialesPartido,...encPartido,...flexibles.filter(e=>!idsEnPartidoPool.has(e.id))];
     const empPartido=elegir(poolPartido, nP, 'partido');
 
     empPartido.forEach(emp=>{
@@ -1571,9 +1585,13 @@ function autoplanMonth(y, m){
     if(empPartido.length<nP) warnings.push(`${ds} partido: ${empPartido.length}/${nP}`);
 
     // ─── 2. SOLO COMIDA ──────────────────────────────────────
-    // El encargado de comida = el que NO fue a partido
+    // Parciales de comida fija + encargado que no fue a partido + flexibles libres
     const encNoEnPartido=encDisp.filter(e=>!asignados.has(e.id));
-    const poolComida=[...encNoEnPartido,...noEnc.filter(e=>!asignados.has(e.id))];
+    const poolComida=[
+      ...parcialesComida.filter(e=>!asignados.has(e.id)),
+      ...encNoEnPartido,
+      ...flexibles.filter(e=>!asignados.has(e.id))
+    ];
     const empComida=elegir(poolComida, nC, 'comida');
 
     empComida.forEach(emp=>{
@@ -1584,10 +1602,13 @@ function autoplanMonth(y, m){
     if(empComida.length<nC) warnings.push(`${ds} comida: ${empComida.length}/${nC}`);
 
     // ─── 3. SOLO CENA ─────────────────────────────────────────
-    // El encargado de cena = el que NO fue a partido NI a comida
-    // Si ambos encargados ya están asignados (partido+comida), cena sin encargado
-    const encNoCubiertoAun=encDisp.filter(e=>!asignados.has(e.id));
-    const poolCena=[...encNoCubiertoAun,...noEnc.filter(e=>!asignados.has(e.id))];
+    // Parciales de cena fija + encargado que aún no está asignado + flexibles libres
+    const encParaCena=encDisp.filter(e=>!asignados.has(e.id));
+    const poolCena=[
+      ...parcialesCena.filter(e=>!asignados.has(e.id)),
+      ...encParaCena,
+      ...flexibles.filter(e=>!asignados.has(e.id))
+    ];
     const empCena=elegir(poolCena, nN, 'cena');
 
     empCena.forEach(emp=>{
