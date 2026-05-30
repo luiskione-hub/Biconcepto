@@ -1974,6 +1974,122 @@ function plE(mn){return['alq','luz','gas','tel','agu','imp','ase','mnt','lim','m
 function plR(mn){return plI(mn)+plCP(mn)+plP(mn)+plE(mn);}
 function plT(fn){return[1,2,3,4].reduce((a,m)=>a+fn(m),0);}
 
+function staffingReport(){
+  // Analizar los últimos 60 días con datos reales
+  const COSTE_HR = 12;
+  const OBJ_MIN = 25, OBJ_MAX = 35; // % laboral objetivo hostelería
+  const DOW_LABEL = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  const cfg = getPlanConfig();
+
+  // Calcular ventas medias por día de semana desde salesHistory
+  const byDow = {0:[],1:[],2:[],3:[],4:[],5:[],6:[]};
+  DB.salesHistory.filter(s=>s.date&&s.date.length>=10).forEach(s=>{
+    const d = new Date(s.date).getDay();
+    if(!isNaN(d)) byDow[d].push(s.amount||0);
+  });
+
+  // Calcular coste por día de semana según reglas actuales
+  const dowAnalysis = [1,2,3,4,5,6,0].map(dow=>{
+    const rule = cfg.rules[dow];
+    const sh = cfg.shifts;
+    const nPersonas = rule.p + Math.max(0,rule.c-rule.p) + Math.max(0,rule.n-rule.p);
+    const horas = rule.p*(hrsOf(sh.partido1.start,sh.partido1.end)+hrsOf(sh.partido2.start,sh.partido2.end))
+                + Math.max(0,rule.c-rule.p)*hrsOf(sh.comida.start,sh.comida.end)
+                + Math.max(0,rule.n-rule.p)*hrsOf(sh.cena.start,sh.cena.end);
+    const costeDia = horas * COSTE_HR;
+    const ventas = byDow[dow];
+    const ventaMedia = ventas.length ? ventas.reduce((a,b)=>a+b,0)/ventas.length : 0;
+    const ratio = ventaMedia > 0 ? costeDia/ventaMedia*100 : null;
+    let estado, color, icon;
+    if(ratio === null){ estado='Sin datos'; color='var(--text3)'; icon='fa-question'; }
+    else if(ratio < OBJ_MIN){ estado='Infradimensionado'; color='var(--amber)'; icon='fa-arrow-down'; }
+    else if(ratio > OBJ_MAX){ estado='Sobredimensionado'; color='var(--red)'; icon='fa-arrow-up'; }
+    else { estado='Óptimo'; color='var(--green)'; icon='fa-check'; }
+    return {dow, label:DOW_LABEL[dow], nPersonas, horas:Math.round(horas), costeDia:Math.round(costeDia), ventaMedia:Math.round(ventaMedia), ratio, estado, color, icon, nDias:ventas.length};
+  });
+
+  // Resumen global
+  const conDatos = dowAnalysis.filter(d=>d.ratio!==null);
+  const totalVentaSemana = conDatos.reduce((a,d)=>a+d.ventaMedia,0);
+  const totalCosteSemana = conDatos.reduce((a,d)=>a+d.costeDia,0);
+  const ratioGlobal = totalVentaSemana>0 ? totalCosteSemana/totalVentaSemana*100 : null;
+  let estadoGlobal, colorGlobal;
+  if(!ratioGlobal){ estadoGlobal='Sin datos suficientes'; colorGlobal='var(--text3)'; }
+  else if(ratioGlobal<OBJ_MIN){ estadoGlobal='Plantilla infradimensionada'; colorGlobal='var(--amber)'; }
+  else if(ratioGlobal>OBJ_MAX){ estadoGlobal='Plantilla sobredimensionada'; colorGlobal='var(--red)'; }
+  else { estadoGlobal='Plantilla óptima'; colorGlobal='var(--green)'; }
+
+  // Recomendaciones automáticas
+  const recs = [];
+  dowAnalysis.forEach(d=>{
+    if(d.ratio===null)return;
+    if(d.ratio > OBJ_MAX + 5){
+      const personasMenos = Math.ceil((d.costeDia - d.ventaMedia*OBJ_MAX/100) / (COSTE_HR * (d.horas/d.nPersonas)));
+      recs.push({tipo:'reducir', dow:d.label, msg:`Reducir ${personasMenos} persona${personasMenos>1?'s':''} — ratio actual ${d.ratio.toFixed(0)}% (objetivo ≤${OBJ_MAX}%)`, color:'var(--red)'});
+    } else if(d.ratio < OBJ_MIN - 5){
+      const personasMas = Math.floor((d.ventaMedia*OBJ_MIN/100 - d.costeDia) / (COSTE_HR * (d.horas/d.nPersonas)));
+      if(personasMas>0) recs.push({tipo:'ampliar', dow:d.label, msg:`Puedes añadir hasta ${personasMas} persona${personasMas>1?'s':''} — ratio actual ${d.ratio.toFixed(0)}% (margen hasta ${OBJ_MIN}%)`, color:'var(--amber)'});
+    }
+  });
+
+  const recRows = recs.length
+    ? recs.map(r=>`<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border)">
+        <i class="fa fa-${r.tipo==='reducir'?'triangle-exclamation':'lightbulb'}" style="color:${r.color};margin-top:2px"></i>
+        <div><strong style="color:var(--text)">${r.dow}:</strong> <span style="color:var(--text2);font-size:13px">${r.msg}</span></div>
+      </div>`).join('')
+    : '<div style="padding:12px;color:var(--text3);font-size:13px">Sin recomendaciones — todos los días dentro del rango óptimo.</div>';
+
+  const tableRows = dowAnalysis.map(d=>{
+    const barW = d.ratio ? Math.min(100, d.ratio/50*100) : 0;
+    const barCol = !d.ratio?'var(--border)':d.ratio<OBJ_MIN?'var(--amber)':d.ratio>OBJ_MAX?'var(--red)':'var(--green)';
+    return`<tr>
+      <td style="font-weight:600">${d.label}</td>
+      <td style="text-align:center">${d.nPersonas}p</td>
+      <td style="text-align:right;font-family:var(--mono)">${d.ventaMedia>0?eur(d.ventaMedia):'—'}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--amber)">${eur(d.costeDia)}</td>
+      <td style="min-width:120px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <div style="flex:1;background:var(--bg3);border-radius:4px;height:6px;position:relative">
+            <div style="width:${barW}%;background:${barCol};height:6px;border-radius:4px"></div>
+            <div style="position:absolute;left:${OBJ_MIN/50*100}%;top:-2px;width:1px;height:10px;background:var(--text3);opacity:.4"></div>
+            <div style="position:absolute;left:${OBJ_MAX/50*100}%;top:-2px;width:1px;height:10px;background:var(--text3);opacity:.4"></div>
+          </div>
+          <span style="font-family:var(--mono);font-size:11px;color:${barCol};min-width:36px">${d.ratio!==null?d.ratio.toFixed(0)+'%':'—'}</span>
+        </div>
+      </td>
+      <td><span style="color:${d.color};font-size:12px;display:flex;align-items:center;gap:4px"><i class="fa ${d.icon}"></i>${d.estado}</span></td>
+      <td style="font-size:11px;color:var(--text3)">${d.nDias} días</td>
+    </tr>`;
+  }).join('');
+
+  return`<div class="card" style="margin-top:16px;border-top:3px solid ${colorGlobal}">
+    <div class="card-header">
+      <span class="card-title"><i class="fa fa-users" style="color:${colorGlobal}"></i> Análisis de plantilla</span>
+      <span style="font-size:12px;font-weight:600;color:${colorGlobal}">${estadoGlobal}${ratioGlobal?` · ${ratioGlobal.toFixed(1)}% ratio laboral`:''}</span>
+    </div>
+    <div style="padding:12px 16px;background:var(--bg3);border-bottom:1px solid var(--border);display:flex;gap:24px;flex-wrap:wrap">
+      <div style="font-size:12px;color:var(--text3)">
+        <i class="fa fa-circle-info" style="color:var(--accent)"></i>
+        Objetivo hostelería: <strong style="color:var(--text)">25–35%</strong> coste laboral sobre ventas ·
+        Coste hora estimado: <strong style="color:var(--text)">12€/h</strong> (bruto + SS) ·
+        Basado en <strong style="color:var(--text)">${DB.salesHistory.length} días</strong> de histórico real
+      </div>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th>Día</th><th style="text-align:center">Personal</th>
+        <th style="text-align:right">Venta media</th>
+        <th style="text-align:right">Coste personal</th>
+        <th>Ratio laboral <span style="font-size:9px;color:var(--text3);font-weight:400">(objetivo 25–35%)</span></th>
+        <th>Estado</th><th>Muestra</th>
+      </tr></thead>
+      <tbody>${tableRows}</tbody>
+    </table></div>
+    ${recs.length?`<div style="border-top:1px solid var(--border)"><div style="padding:8px 16px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3)">Recomendaciones</div>${recRows}</div>`:''}
+    ${DB.salesHistory.length<14?`<div class="alert-item warning" style="margin:12px 16px 12px"><i class="fa fa-triangle-exclamation alert-icon"></i><div class="alert-msg">Pocos datos históricos (${DB.salesHistory.length} días). Importa el Export-13 para mejorar el análisis.</div></div>`:''}
+  </div>`;
+}
+
 function pgResults(){
   const mns=[1,2,3,4],TI=plT(plI),TM=plT(plMB),TP=plT(plP),TE=plT(plE),TR=plT(plR);
   function fv(v,sec,ing){
@@ -2017,6 +2133,7 @@ function pgResults(){
       <div class="card"><div class="card-header"><span class="card-title">Ingresos · Margen · Resultado</span></div><div class="chart-wrap" style="height:200px"><canvas id="c_pl1"></canvas></div></div>
       <div class="card"><div class="card-header"><span class="card-title">Estructura de costes</span></div><div class="chart-wrap" style="height:200px"><canvas id="c_pl2"></canvas></div></div>
     </div>
+    ${staffingReport()}
   </div>`;
 }
 function afResults(){
