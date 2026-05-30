@@ -526,6 +526,7 @@ textarea.form-control { resize: vertical; min-height: 80px; }
         <a href="#" class="nav-item" data-page="shifts"><i class="fa fa-calendar-days"></i> Turnos</a>
         <a href="#" class="nav-item" data-page="schedule"><i class="fa fa-table-cells"></i> Cuadrante</a>
         <a href="#" class="nav-item" data-page="scheduleConfig"><i class="fa fa-sliders"></i> Config. turnos</a>
+        <a href="#" class="nav-item" data-page="optimalStaff"><i class="fa fa-calculator"></i> Plantilla óptima</a>
         <a href="#" class="nav-item" data-page="vacations"><i class="fa fa-umbrella-beach"></i> Vacaciones</a>
       </div>
       <div class="nav-section">
@@ -902,6 +903,7 @@ function setupNav(){
 // ADD A PAGE: (1) write pgXxx() + afXxx() below, (2) add entry here
 const PAGES = {
   scheduleConfig:[pgScheduleConfig, null        ],
+  optimalStaff: [pgOptimalStaff,  null        ],
   users:      [pgUsers,        null        ],
   stocks:     [pgStocks,     null        ],
   stockOrder: [pgStockOrder, null        ],
@@ -1942,7 +1944,26 @@ function pgImporter(){
   return`<div class="page-header"><div><h2>Importar datos</h2></div></div>
   <div class="page-body">
     <div class="grid-2">
-      <div class="card"><div style="display:flex;align-items:center;gap:12px;margin-bottom:10px"><i class="fa fa-cash-register" style="font-size:20px;color:var(--green)"></i><div><div style="font-weight:500">Facturación Export-8</div><div style="font-size:11px;color:var(--text3)">NMes · NDia Semana · Total</div></div></div><label class="drop-zone" for="fS" style="display:block;cursor:pointer"><i class="fa fa-cloud-arrow-up"></i><p>Arrastra o <span>selecciona</span></p></label><input type="file" id="fS" accept=".xlsx,.xls" style="display:none" onchange="impSales(this)"><div id="rS" style="margin-top:8px"></div></div>
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+          <i class="fa fa-cash-register" style="font-size:20px;color:var(--green)"></i>
+          <div><div style="font-weight:500">Ventas Export-13 (Codisys)</div>
+          <div style="font-size:11px;color:var(--text3)">Tickets detallados con fecha, hora e importe — <strong>formato recomendado</strong></div></div>
+        </div>
+        <label class="drop-zone" for="fS13" style="display:block;cursor:pointer"><i class="fa fa-cloud-arrow-up"></i><p>Arrastra o <span>selecciona</span></p></label>
+        <input type="file" id="fS13" accept=".xlsx,.xls" style="display:none" onchange="impSales13(this)">
+        <div id="rS13" style="margin-top:8px"></div>
+      </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+          <i class="fa fa-cash-register" style="font-size:20px;color:var(--text3)"></i>
+          <div><div style="font-weight:500">Facturación Export-8 (legacy)</div>
+          <div style="font-size:11px;color:var(--text3)">NMes · NDia Semana · Total</div></div>
+        </div>
+        <label class="drop-zone" for="fS" style="display:block;cursor:pointer"><i class="fa fa-cloud-arrow-up"></i><p>Arrastra o <span>selecciona</span></p></label>
+        <input type="file" id="fS" accept=".xlsx,.xls" style="display:none" onchange="impSales(this)">
+        <div id="rS" style="margin-top:8px"></div>
+      </div>
       <div class="card"><div style="display:flex;align-items:center;gap:12px;margin-bottom:10px"><i class="fa fa-chart-bar" style="font-size:20px;color:var(--purple)"></i><div><div style="font-weight:500">Ventas por hora Export-10</div><div style="font-size:11px;color:var(--text3)">NUM Dia Semana · Tramo Hora · Total</div></div></div><label class="drop-zone" for="fH" style="display:block;cursor:pointer"><i class="fa fa-cloud-arrow-up"></i><p>Arrastra o <span>selecciona</span></p></label><input type="file" id="fH" accept=".xlsx,.xls" style="display:none" onchange="impHourly(this)"><div id="rH" style="margin-top:8px"></div></div>
       <div class="card"><div style="display:flex;align-items:center;gap:12px;margin-bottom:10px"><i class="fa fa-building-columns" style="font-size:20px;color:var(--accent)"></i><div><div style="font-weight:500">Extracto BBVA</div><div style="font-size:11px;color:var(--text3)">Histórico movimientos BBVA</div></div></div><label class="drop-zone" for="fB" style="display:block;cursor:pointer"><i class="fa fa-cloud-arrow-up"></i><p>Arrastra o <span>selecciona</span></p></label><input type="file" id="fB" accept=".xlsx,.xls" style="display:none" onchange="impBank(this)"><div id="rB" style="margin-top:8px"></div></div>
       <div class="card"><div style="display:flex;align-items:center;gap:12px;margin-bottom:10px"><i class="fa fa-boxes-stacking" style="font-size:20px;color:var(--amber)"></i><div><div style="font-weight:500">Histórico Logirest (Stocks)</div><div style="font-size:11px;color:var(--text3)">Albaranes PDF valorados de Logirest (varios a la vez)</div></div></div><label class="drop-zone" for="fLg3" style="display:block;cursor:pointer"><i class="fa fa-cloud-arrow-up"></i><p>Arrastra o <span>selecciona</span></p></label><input type="file" id="fLg3" accept=".pdf,.PDF" multiple style="display:none" onchange="impLogirest(this)"><div id="rLogirest" style="margin-top:8px"></div></div>
@@ -1950,6 +1971,124 @@ function pgImporter(){
     </div>
     ${log.length?`<div class="card" style="margin-top:16px"><div class="card-header"><span class="card-title">Historial</span></div><div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Registros</th><th></th></tr></thead><tbody>${log.map(l=>`<tr><td style="font-size:12px;color:var(--text3)">${l.ts}</td><td>${l.type}</td><td class="td-mono">${l.records}</td><td><span class="badge badge-${l.ok?'green':'red'}">${l.ok?'OK':'Error'}</span></td></tr>`).join('')}</tbody></table></div></div>`:''}
   </div>`;
+}
+
+// ── IMPORTADOR EXPORT-13 (Codisys tickets detallados) ────────
+function impSales13(inp){
+  const file=inp.files[0]; if(!file)return;
+  showR('rS13',true,'Leyendo archivo…');
+  const r=new FileReader();
+  r.onload=e=>{
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{defval:''});
+      if(!rows.length)throw new Error('Archivo vacío');
+
+      const keys=Object.keys(rows[0]);
+      const fk=(...n)=>keys.find(k=>n.some(x=>k.toLowerCase().includes(x.toLowerCase())));
+
+      // Detectar columnas clave
+      const kFecha=fk('fecha');
+      const kHora=fk('hora');
+      const kImporte=fk('importe');
+      const kTicket=fk('ejenum','num','ticket');
+
+      if(!kFecha||!kImporte) throw new Error(`Columnas no encontradas. Encontradas: ${keys.slice(0,8).join(', ')}`);
+
+      // Agrupar por fecha real
+      const byDate={};
+      const byDateHour={};
+
+      rows.forEach(row=>{
+        const rawFecha=row[kFecha];
+        const rawImporte=parseFloat(String(row[kImporte]).replace(',','.'))||0;
+        if(!rawFecha||!rawImporte)return;
+
+        // Parsear fecha
+        let fechaStr;
+        if(rawFecha instanceof Date){
+          fechaStr=rawFecha.toISOString().slice(0,10);
+        } else {
+          const d=new Date(rawFecha);
+          if(isNaN(d.getTime())){
+            // Intentar parseo manual DD/MM/YYYY
+            const parts=String(rawFecha).split(/[\/\-\.]/);
+            if(parts.length===3){
+              const [a,b,c]=parts;
+              fechaStr=c.length===4?`${c}-${b.padStart(2,'0')}-${a.padStart(2,'0')}`:
+                                    `${a}-${b.padStart(2,'0')}-${c.padStart(2,'0')}`;
+            }
+          } else {
+            fechaStr=d.toISOString().slice(0,10);
+          }
+        }
+        if(!fechaStr)return;
+
+        // Acumular importe diario
+        if(!byDate[fechaStr]) byDate[fechaStr]={total:0,tickets:new Set()};
+        byDate[fechaStr].total+=rawImporte;
+        if(kTicket&&row[kTicket]) byDate[fechaStr].tickets.add(String(row[kTicket]));
+
+        // Acumular por hora
+        if(kHora){
+          const hora=parseInt(String(row[kHora]).slice(0,2))||0;
+          const hk=`${fechaStr}_${hora}`;
+          if(!byDateHour[hk]) byDateHour[hk]={fecha:fechaStr,hora,total:0};
+          byDateHour[hk].total+=rawImporte;
+        }
+      });
+
+      // Guardar en salesHistory con fecha real
+      let added=0, updated=0;
+      Object.entries(byDate).forEach(([fecha,{total,tickets}])=>{
+        const existing=DB.salesHistory.find(s=>s.date===fecha&&s._src==='exp13');
+        if(existing){
+          existing.amount=Math.round(total*100)/100;
+          existing.tickets=tickets.size;
+          updated++;
+        } else {
+          DB.salesHistory.push({
+            id:maxId(DB.salesHistory),
+            date:fecha,
+            amount:Math.round(total*100)/100,
+            tickets:tickets.size,
+            _src:'exp13',
+            _key:fecha
+          });
+          added++;
+        }
+      });
+
+      // Actualizar HOURLY con datos reales por día de semana
+      const hourlyAgg={};
+      Object.values(byDateHour).forEach(({fecha,hora,total})=>{
+        const dow=['D','L','M','X','J','V','S'][new Date(fecha).getDay()];
+        const k=`${hora}_${dow}`;
+        if(!hourlyAgg[k]) hourlyAgg[k]={hora,dow,vals:[]};
+        hourlyAgg[k].vals.push(total);
+      });
+      Object.values(hourlyAgg).forEach(({hora,dow,vals})=>{
+        const avg=vals.reduce((a,b)=>a+b,0)/vals.length;
+        if(!HOURLY[hora]) HOURLY[hora]={};
+        HOURLY[hora][dow]=Math.round(avg);
+      });
+
+      save();
+      logImp('Export-13',added+updated,true);
+      audit('import_ventas',`Export-13: ${added} días nuevos, ${updated} actualizados`);
+      showR('rS13',true,
+        `✓ ${added} días importados${updated?`, ${updated} actualizados`:''}`,
+        `<a href="#" onclick="go('sales')" style="color:var(--accent)">Ver ventas →</a>`
+      );
+      go('importer');
+    }catch(err){
+      logImp('Export-13',0,false);
+      showR('rS13',false,'Error: '+err.message);
+      console.error(err);
+    }
+  };
+  r.readAsArrayBuffer(file);
 }
 
 function impSales(inp){
@@ -2392,6 +2531,7 @@ const ALL_PAGES = [
   {id:'shifts',       label:'Turnos',             icon:'fa-calendar-days'},
   {id:'schedule',     label:'Cuadrante',          icon:'fa-table-cells'},
   {id:'scheduleConfig',label:'Config. turnos',    icon:'fa-sliders'},
+  {id:'optimalStaff',  label:'Plantilla óptima',  icon:'fa-calculator'},
   {id:'vacations',    label:'Vacaciones',         icon:'fa-umbrella-beach'},
   {id:'sales',        label:'Ventas',             icon:'fa-cash-register'},
   {id:'bank',         label:'Banco',              icon:'fa-building-columns'},
@@ -2815,6 +2955,206 @@ function updateNoPair(i,pos,val){
 function savePlanConfig(){
   save(); flash('✓ Configuración guardada');
 }
+
+// ── PLANTILLA ÓPTIMA ────────────────────────────────────────
+// Calcula el número de personas y tipo de contrato óptimo
+// basándose en ventas históricas y ratio laboral objetivo (30%)
+// Coste hora media: ~10€/h (ajustable en config)
+function calcOptimalStaff(year, month){
+  const mStr=`${year}-${String(month).padStart(2,'0')}`;
+  const days=new Date(year,month,0).getDate();
+  const cfg=getPlanConfig();
+  const costHrMedio=12; // €/hora media (encima de convenio con SS)
+
+  // Ventas del mes en histórico
+  const salesMes=DB.salesHistory.filter(s=>s.date&&s.date.startsWith(mStr));
+  const totalVentas=salesMes.reduce((a,s)=>a+(s.amount||0),0);
+
+  // Si no hay datos reales, estimar por patrón semanal
+  let ventasEstimadas=totalVentas;
+  if(!totalVentas){
+    // Estimar usando mismo mes del año anterior o media mensual
+    const prevYear=DB.salesHistory.filter(s=>s.date&&s.date.startsWith(`${year-1}-${String(month).padStart(2,'0')}`));
+    ventasEstimadas=prevYear.reduce((a,s)=>a+(s.amount||0),0);
+    if(!ventasEstimadas){
+      // Media de todos los días disponibles por día de semana
+      const weekAvg={};
+      DB.salesHistory.forEach(s=>{
+        if(!s.date||s.date.length<10)return;
+        const d=new Date(s.date).getDay();
+        if(!weekAvg[d]) weekAvg[d]=[];
+        weekAvg[d].push(s.amount||0);
+      });
+      for(let d=1;d<=days;d++){
+        const dow=new Date(`${mStr}-${String(d).padStart(2,'0')}`).getDay();
+        const avg=weekAvg[dow]&&weekAvg[dow].length?weekAvg[dow].reduce((a,b)=>a+b,0)/weekAvg[dow].length:2500;
+        ventasEstimadas+=avg;
+      }
+    }
+  }
+
+  // Presupuesto laboral objetivo (30% de ventas = convenio hostelería)
+  const ratioLaboral=DB.obj&&DB.obj.laborPct?DB.obj.laborPct/100:0.30;
+  const budgetLaboral=ventasEstimadas*ratioLaboral;
+
+  // Horas totales necesarias por mes según reglas de negocio
+  let hrsComida=0, hrsCena=0, hrsPartido=0;
+  for(let d=1;d<=days;d++){
+    const dow=new Date(`${mStr}-${String(d).padStart(2,'0')}`).getDay();
+    const rule=cfg.rules[dow];
+    const sh=cfg.shifts;
+    hrsComida+=(rule.c-rule.p)*hrsOf(sh.comida.start,sh.comida.end);
+    hrsCena+=(rule.n-rule.p)*hrsOf(sh.cena.start,sh.cena.end);
+    hrsPartido+=rule.p*(hrsOf(sh.partido1.start,sh.partido1.end)+hrsOf(sh.partido2.start,sh.partido2.end));
+  }
+  const hrsTotales=hrsComida+hrsCena+hrsPartido;
+
+  // Coste laboral si contratamos las horas necesarias
+  const costeLaboralNecesario=hrsTotales*costHrMedio;
+
+  // Personas a jornada completa (160h/mes aprox) y parcial (80h/mes)
+  const hrsJC=40*4.33; // ~173h/mes
+  const hrsJP=20*4.33; // ~87h/mes
+
+  // Distribución óptima minimizando coste con budget laboral
+  const nJC=Math.floor(hrsTotales/hrsJC);
+  const hrsRestantes=hrsTotales-(nJC*hrsJC);
+  const nJP=Math.ceil(hrsRestantes/hrsJP);
+
+  // Alternativa: solo parciales
+  const nJP_solo=Math.ceil(hrsTotales/hrsJP);
+
+  // Alternativa: mix equilibrado
+  const costeJC=nJC*hrsJC*costHrMedio;
+  const costeJP_resto=nJP*hrsJP*costHrMedio;
+  const costeMix=costeJC+costeJP_resto;
+  const costeSoloParcial=nJP_solo*hrsJP*costHrMedio;
+
+  // Horas extra (si se supera budget)
+  const dentroDePresupuesto=costeLaboralNecesario<=budgetLaboral;
+
+  return{
+    mStr, year, month, days,
+    ventasEstimadas:Math.round(ventasEstimadas),
+    budgetLaboral:Math.round(budgetLaboral),
+    hrsTotales:Math.round(hrsTotales),
+    costeLaboralNecesario:Math.round(costeLaboralNecesario),
+    dentroDePresupuesto,
+    opciones:[
+      {label:'Mix óptimo', nJC, nJP, horas:Math.round(nJC*hrsJC+nJP*hrsJP), coste:Math.round(costeMix), personas:nJC+nJP},
+      {label:'Solo 20h', nJC:0, nJP:nJP_solo, horas:Math.round(nJP_solo*hrsJP), coste:Math.round(costeSoloParcial), personas:nJP_solo},
+      {label:'Solo 40h', nJC:Math.ceil(hrsTotales/hrsJC), nJP:0, horas:Math.round(Math.ceil(hrsTotales/hrsJC)*hrsJC), coste:Math.round(Math.ceil(hrsTotales/hrsJC)*hrsJC*costHrMedio), personas:Math.ceil(hrsTotales/hrsJC)},
+    ],
+    // Vacaciones del mes: personas en vacaciones reducen horas disponibles
+    vacInMes: DB.vacations.filter(v=>v.start.startsWith(mStr)||v.end.startsWith(mStr)||(v.start<mStr&&v.end>mStr+'-31')).length,
+    hrsComida:Math.round(hrsComida), hrsCena:Math.round(hrsCena), hrsPartido:Math.round(hrsPartido),
+    fuente: totalVentas>0 ? 'real' : (DB.salesHistory.length>0 ? 'histórico' : 'estimado')
+  };
+}
+
+function pgOptimalStaff(){
+  const now=new Date();
+  const selY=parseInt(_store.getItem('opt_y')||now.getFullYear());
+  const selM=parseInt(_store.getItem('opt_m')||now.getMonth()+2); // siguiente mes por defecto
+  const months=[];
+  for(let m=1;m<=12;m++) months.push({m,label:new Date(selY,m-1,1).toLocaleString('es-ES',{month:'long'})});
+
+  const res=calcOptimalStaff(selY,selM);
+
+  const opRows=res.opciones.map((op,i)=>{
+    const pct=res.ventasEstimadas>0?Math.round(op.coste/res.ventasEstimadas*100):0;
+    const ok=op.coste<=res.budgetLaboral;
+    return`<tr style="${i===0?'background:var(--bg3)':''}">
+      <td style="font-weight:${i===0?'600':'400'}">${op.label} ${i===0?'<span class="badge badge-green">Recomendado</span>':''}</td>
+      <td style="text-align:center"><span style="background:var(--accent);color:#fff;padding:2px 10px;border-radius:12px;font-weight:600">${op.nJC}</span> × 40h</td>
+      <td style="text-align:center"><span style="background:var(--teal);color:#fff;padding:2px 10px;border-radius:12px;font-weight:600">${op.nJP}</span> × 20h</td>
+      <td style="text-align:center;font-weight:600">${op.personas} personas</td>
+      <td class="td-mono" style="color:${ok?'var(--green)':'var(--red)'}">${eur(op.coste)}</td>
+      <td class="td-mono" style="color:${ok?'var(--green)':'var(--red)'}">${pct}%</td>
+      <td><span class="badge badge-${ok?'green':'red'}">${ok?'✓ En presupuesto':'⚠ Supera'}${!ok?` +${eur(op.coste-res.budgetLaboral)}`:''}</span></td>
+    </tr>`;
+  }).join('');
+
+  // Resumen por semana de necesidades
+  const weekSummary=[1,2,3,4,5,6,0].map(dow=>{
+    const rule=getPlanConfig().rules[dow];
+    const dow_label=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][dow];
+    const total=(rule.c-rule.p)+rule.p+(rule.n-rule.p);
+    return`<tr>
+      <td style="font-weight:500">${dow_label}</td>
+      <td style="text-align:center">${rule.p}</td>
+      <td style="text-align:center">${rule.c-rule.p}</td>
+      <td style="text-align:center">${rule.n-rule.p}</td>
+      <td style="text-align:center;font-weight:600;color:var(--accent)">${total}</td>
+    </tr>`;
+  }).join('');
+
+  return`<div class="page-header">
+    <div><h2><i class="fa fa-calculator"></i> Plantilla óptima</h2>
+    <p>Calcula la estructura de personal ideal según ventas y presupuesto laboral</p></div>
+    <div class="page-actions" style="display:flex;gap:8px;align-items:center">
+      <select style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px"
+        onchange="_store.setItem('opt_m',this.value);go('optimalStaff')">
+        ${months.map(m=>`<option value="${m.m}"${m.m===selM?' selected':''}>${m.label}</option>`).join('')}
+      </select>
+      <select style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px"
+        onchange="_store.setItem('opt_y',this.value);go('optimalStaff')">
+        ${[now.getFullYear()-1,now.getFullYear(),now.getFullYear()+1].map(y=>`<option value="${y}"${y===selY?' selected':''}>${y}</option>`).join('')}
+      </select>
+    </div>
+  </div>
+  <div class="page-body" style="display:flex;flex-direction:column;gap:16px">
+
+    <!-- KPIs -->
+    <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
+      <div class="kpi-card">
+        <div class="kpi-label">Ventas estimadas</div>
+        <div class="kpi-val">${eur(res.ventasEstimadas)}</div>
+        <div class="kpi-sub" style="color:var(--text3)">Fuente: ${res.fuente}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Budget laboral (${Math.round((DB.obj&&DB.obj.laborPct)||30)}%)</div>
+        <div class="kpi-val">${eur(res.budgetLaboral)}</div>
+        <div class="kpi-sub">Máximo recomendado</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Horas necesarias</div>
+        <div class="kpi-val">${res.hrsTotales}h</div>
+        <div class="kpi-sub">${res.hrsComida}h comida · ${res.hrsCena}h cena · ${res.hrsPartido}h partido</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Vacaciones en el mes</div>
+        <div class="kpi-val">${res.vacInMes}</div>
+        <div class="kpi-sub">Periodos activos</div>
+      </div>
+    </div>
+
+    <!-- Opciones de plantilla -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title"><i class="fa fa-users"></i> Opciones de plantilla</span>
+        <span style="font-size:11px;color:var(--text3)">Coste hora estimado: ~12€/h (bruto + SS)</span>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Opción</th><th style="text-align:center">Jornada completa</th><th style="text-align:center">Media jornada</th><th style="text-align:center">Total</th><th>Coste mensual</th><th>% ventas</th><th>Estado</th></tr></thead>
+        <tbody>${opRows}</tbody>
+      </table></div>
+    </div>
+
+    <!-- Distribución semanal -->
+    <div class="card">
+      <div class="card-header"><span class="card-title"><i class="fa fa-calendar-week"></i> Necesidades por día de semana</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Día</th><th style="text-align:center">Turno partido</th><th style="text-align:center">Solo comida</th><th style="text-align:center">Solo cena</th><th style="text-align:center">Total personas/día</th></tr></thead>
+        <tbody>${weekSummary}</tbody>
+      </table></div>
+    </div>
+
+    ${res.fuente!=='real'?`<div class="alert-item warning" style="margin:0"><i class="fa fa-triangle-exclamation alert-icon"></i><div><div class="alert-msg">No hay ventas reales para ${new Date(selY,selM-1,1).toLocaleString('es-ES',{month:'long',year:'numeric'})}.</div><div class="alert-meta">Importa el Export-13 de ese mes o ajusta las ventas previstas en Objetivos para mejorar el cálculo.</div></div></div>`:''}
+
+  </div>`;
+}
+// ─────────────────────────────────────────────────────────────
 
 function pgStocks(){
   checkStockAlarm();
