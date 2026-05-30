@@ -453,6 +453,7 @@ textarea.form-control { resize: vertical; min-height: 80px; }
         <a href="#" class="nav-item" data-page="employees"><i class="fa fa-users"></i> Empleados</a>
         <a href="#" class="nav-item" data-page="shifts"><i class="fa fa-calendar-days"></i> Turnos</a>
         <a href="#" class="nav-item" data-page="schedule"><i class="fa fa-table-cells"></i> Cuadrante</a>
+        <a href="#" class="nav-item" data-page="scheduleConfig"><i class="fa fa-sliders"></i> Config. turnos</a>
         <a href="#" class="nav-item" data-page="vacations"><i class="fa fa-umbrella-beach"></i> Vacaciones</a>
       </div>
       <div class="nav-section">
@@ -601,6 +602,12 @@ const DB = {
   fixedCosts:Object.entries(FIXED_COSTS).map((e,i)=>({id:i+1,name:e[0],amount:e[1],active:true})),
   obj:{laborPct:30,minSales:1200,sph:45},
   shifts:[],vacations:[],salesHistory:[],bankMovements:[],jibbleData:[],_log:[],stockItems:[],stockOrders:[],stockSnapshots:[],
+  planConfig:{
+    rules:{1:{c:4,n:4,p:2},2:{c:4,n:4,p:2},3:{c:5,n:8,p:5},4:{c:5,n:8,p:5},5:{c:4,n:6,p:4},6:{c:5,n:9,p:5},0:{c:6,n:7,p:6}},
+    shifts:{comida:{start:'10:00',end:'18:30'},cena:{start:'19:00',end:'01:30'},partido1:{start:'12:00',end:'16:00'},partido2:{start:'20:00',end:'00:30'}},
+    noCoincide:[[1,2]],
+    encargados:[1,2]
+  },
   alerts:[
     {id:1,sev:'error',msg:'Linda Katerine Martínez — baja médica activa.',done:false},
     {id:2,sev:'error',msg:'Natividad Encomienda — baja médica activa.',done:false},
@@ -612,9 +619,9 @@ const DB = {
 // ─── Safe storage (funciona en Safari file://, iOS, modo privado) ────────────
 const _memStore = {};
 const _store = {
-  getItem(k){ try{ return _store.getItem(k); }catch(e){ return _memStore[k]||null; } },
-  setItem(k,v){ try{ _store.setItem(k,v); }catch(e){ _memStore[k]=v; } },
-  removeItem(k){ try{ _store.removeItem(k); }catch(e){ delete _memStore[k]; } }
+  getItem(k){ try{ return localStorage.getItem(k); }catch(e){ return _memStore[k]||null; } },
+  setItem(k,v){ try{ localStorage.setItem(k,v); }catch(e){ _memStore[k]=v; } },
+  removeItem(k){ try{ localStorage.removeItem(k); }catch(e){ delete _memStore[k]; } }
 };
 
 // ─── Load persisted data ─────────────────────────────────────
@@ -625,7 +632,7 @@ const _store = {
     const p = JSON.parse(raw);
     const keys = ['employees','shifts','vacations','alerts','bankMovements',
                   'fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory',
-                  'stockItems','stockOrders','stockSnapshots'];
+                  'stockItems','stockOrders','stockSnapshots','planConfig'];
     keys.forEach(k => { if (p[k] !== undefined) DB[k] = p[k]; });
   } catch(e) { console.warn('Load error:', e); }
 })();
@@ -655,7 +662,7 @@ function save() {
     const p = {};
     ['employees','shifts','vacations','alerts','bankMovements','fixedCosts',
      'obj','legal','conv','jibbleData','_log','salesHistory',
-     'stockItems','stockOrders','stockSnapshots'].forEach(k=>{p[k]=DB[k];});
+     'stockItems','stockOrders','stockSnapshots','planConfig'].forEach(k=>{p[k]=DB[k];});
     p._t = new Date().toISOString();
     _store.setItem('biconcepto_v3', JSON.stringify(p));
   } catch(e) {}
@@ -725,6 +732,7 @@ function setupNav(){
 
 // ADD A PAGE: (1) write pgXxx() + afXxx() below, (2) add entry here
 const PAGES = {
+  scheduleConfig:[pgScheduleConfig, null        ],
   stocks:     [pgStocks,     null        ],
   stockOrder: [pgStockOrder, null        ],
   dashboard:  [pgDashboard,  afDashboard ],
@@ -1060,20 +1068,15 @@ function delVacDay(vacId, ds){
   save(); flash('✓ Vacaciones eliminadas'); calClick(ds); go('schedule');
 }
 
-// ── PLANIFICACIÓN AUTOMÁTICA ─────────────────────────────────
-// Turnos base por día (0=Dom,1=Lun,...,6=Sáb)
-// Turno continuo: 8.5h (8h efectivas + 0.5h descanso obligatorio)
-// Turno partido: 12:00-16:00 + 20:00-00:30 = 8.5h efectivas, sin descanso
-// Comida: 10:00-18:30 (8.5h) | Cena: 16:00-00:30 (8.5h)
-const PLAN_RULES = {
-  1:{comida:['10:00','18:30',4], cena:['19:00','01:30',4]}, // Lunes
-  2:{comida:['10:00','18:30',4], cena:['19:00','01:30',4]}, // Martes
-  3:{comida:['10:00','18:30',5], cena:['19:00','01:30',8]}, // Miércoles
-  4:{comida:['10:00','18:30',5], cena:['19:00','01:30',8]}, // Jueves
-  5:{comida:['10:00','18:30',4], cena:['19:00','01:30',6]}, // Viernes
-  6:{comida:['10:00','18:30',5], cena:['19:00','01:30',9]}, // Sábado
-  0:{comida:['10:00','18:30',6], cena:['19:00','01:30',7]}, // Domingo
-};
+// Acceso a config — usa DB.planConfig si existe, si no valores por defecto
+function getPlanConfig(){
+  if(!DB.planConfig)DB.planConfig={
+    rules:{1:{c:4,n:4,p:2},2:{c:4,n:4,p:2},3:{c:5,n:8,p:5},4:{c:5,n:8,p:5},5:{c:4,n:6,p:4},6:{c:5,n:9,p:5},0:{c:6,n:7,p:6}},
+    shifts:{comida:{start:'10:00',end:'18:30'},cena:{start:'19:00',end:'01:30'},partido1:{start:'12:00',end:'16:00'},partido2:{start:'20:00',end:'00:30'}},
+    noCoincide:[[1,2]],encargados:[1,2]
+  };
+  return DB.planConfig;
+}
 
 // Días de vacaciones según convenio hostelería Ceuta (art.12)
 // Jornada completa (40h): 30 días naturales
@@ -1135,9 +1138,13 @@ function hrsInMonth(empId, mStr){
 }
 
 function autoplanMonth(y, m){
+  const cfg=getPlanConfig();
+  const PLAN_RULES=cfg.rules;
+  const ENCARGADOS=cfg.encargados||[];
+  const SH=cfg.shifts;
   const mStr=`${y}-${String(m).padStart(2,'0')}`;
   const days=new Date(y,m,0).getDate();
-  let added=0, skipped=0, warnings=[];
+  let added=0, warnings=[];
 
   for(let d=1;d<=days;d++){
     const ds=`${mStr}-${String(d).padStart(2,'0')}`;
@@ -1145,43 +1152,82 @@ function autoplanMonth(y, m){
     const rule=PLAN_RULES[dow];
     const factor=planFactor(ds);
     const existing=DB.shifts.filter(s=>s.date===ds);
+    if(existing.length>0)continue; // si ya hay turnos ese día, no tocar
 
-    ['comida','cena'].forEach(franja=>{
-      const [start,end,base]=rule[franja];
-      const nTarget=Math.max(1,base+factor);
-      const already=existing.filter(s=>s.start===start).length;
-      const needed=nTarget-already;
-      if(needed<=0){skipped+=already;return;}
+    // Empleados disponibles ese día
+    const avail=availableEmps(ds);
 
-      const assignedIds=new Set(existing.filter(s=>s.start===start).map(s=>s.employee_id));
-      // Candidatos: disponibles, no asignados ya, con horas contractuales no superadas
-      const avail=availableEmps(ds).filter(e=>{
-        if(assignedIds.has(e.id))return false;
-        // No superar horas mensuales (wh*4.33 aprox)
-        const maxHrsMonth=e.wh*4.33;
-        const used=hrsInMonth(e.id,mStr);
-        return used<maxHrsMonth;
+    // Horas acumuladas en el mes para balancear carga
+    const hrsMap={};
+    avail.forEach(e=>{ hrsMap[e.id]=hrsInMonth(e.id,mStr); });
+
+    // Separar encargados disponibles
+    const encDisp=avail.filter(e=>ENCARGADOS.includes(e.id));
+    const restantes=avail.filter(e=>!ENCARGADOS.includes(e.id));
+
+    // Ajustar por histórico de ventas
+    const nPartido=Math.max(0, rule.p+factor);
+    const nComidaExtra=Math.max(0, rule.c - nPartido);       // continuos solo comida
+    const nCenaExtra=Math.max(0, rule.n - nPartido + factor); // continuos solo cena
+
+    const asignados=new Set();
+
+    // Función para elegir N empleados priorizando menos horas, respetando encargados
+    function elegir(pool, n, turno){
+      // Ordenar: menos horas primero; encargados al final si ya hay uno en otro turno
+      const encEnTurno=turno==='cena'
+        ? DB.shifts.filter(s=>s.date===ds&&s.start==='19:00').some(s=>ENCARGADOS.includes(s.employee_id))
+        : DB.shifts.filter(s=>s.date===ds&&s.start==='10:00').some(s=>ENCARGADOS.includes(s.employee_id));
+
+      const sorted=[...pool].filter(e=>!asignados.has(e.id)).sort((a,b)=>{
+        // Si ya hay un encargado en ese turno, poner el otro encargado al final
+        const aEnc=ENCARGADOS.includes(a.id), bEnc=ENCARGADOS.includes(b.id);
+        if(encEnTurno&&aEnc&&!bEnc)return 1;
+        if(encEnTurno&&!aEnc&&bEnc)return -1;
+        return (hrsMap[a.id]||0)-(hrsMap[b.id]||0);
       });
+      return sorted.slice(0,n);
+    }
 
-      // Priorizar: primero los que tienen menos horas acumuladas en el mes
-      avail.sort((a,b)=>hrsInMonth(a.id,mStr)-hrsInMonth(b.id,mStr));
-
-      const toAssign=avail.slice(0,needed);
-      if(toAssign.length<needed){
-        warnings.push(`${ds} ${franja}: solo ${toAssign.length}/${nTarget} disponibles`);
-      }
-      toAssign.forEach(emp=>{
-        const hrs=hrsOf(start,end);
-        const cost=parseFloat((hrs*emp.hc).toFixed(2));
-        DB.shifts.push({id:maxId(DB.shifts),employee_id:emp.id,date:ds,start,end,cost,status:'auto'});
-        added++;
+      // 1. Asignar turnos PARTIDOS
+      const poolPartido=[...encDisp, ...restantes];
+      const empPartido=elegir(poolPartido, nPartido, 'partido');
+      empPartido.forEach(emp=>{
+        const s1=SH.partido1.start, e1=SH.partido1.end;
+        const s2=SH.partido2.start, e2=SH.partido2.end;
+        DB.shifts.push({id:maxId(DB.shifts),employee_id:emp.id,date:ds,start:s1,end:e1,cost:parseFloat((hrsOf(s1,e1)*emp.hc).toFixed(2)),status:'auto',tipo:'partido-m'});
+        DB.shifts.push({id:maxId(DB.shifts),employee_id:emp.id,date:ds,start:s2,end:e2,cost:parseFloat((hrsOf(s2,e2)*emp.hc).toFixed(2)),status:'auto',tipo:'partido-t'});
+        asignados.add(emp.id);
+        hrsMap[emp.id]=(hrsMap[emp.id]||0)+hrsOf(s1,e1)+hrsOf(s2,e2);
+        added+=2;
       });
-    });
+      if(empPartido.length<nPartido) warnings.push(`${ds} partido: ${empPartido.length}/${nPartido}`);
+
+      // 2. Asignar turnos solo COMIDA
+      const empComida=elegir([...encDisp,...restantes], nComidaExtra, 'comida');
+      empComida.forEach(emp=>{
+        const s=SH.comida.start, e=SH.comida.end;
+        DB.shifts.push({id:maxId(DB.shifts),employee_id:emp.id,date:ds,start:s,end:e,cost:parseFloat((hrsOf(s,e)*emp.hc).toFixed(2)),status:'auto',tipo:'comida'});
+        asignados.add(emp.id); hrsMap[emp.id]=(hrsMap[emp.id]||0)+hrsOf(s,e); added++;
+      });
+      if(empComida.length<nComidaExtra) warnings.push(`${ds} comida: ${empComida.length}/${nComidaExtra}`);
+
+      // 3. Asignar turnos solo CENA
+      const encEnComida=new Set([...empPartido,...empComida].filter(e=>ENCARGADOS.includes(e.id)).map(e=>e.id));
+      const poolCena=[...encDisp.filter(e=>!encEnComida.has(e.id)),...restantes];
+      const empCena=elegir(poolCena, nCenaExtra, 'cena');
+      empCena.forEach(emp=>{
+        const s=SH.cena.start, e=SH.cena.end;
+        DB.shifts.push({id:maxId(DB.shifts),employee_id:emp.id,date:ds,start:s,end:e,cost:parseFloat((hrsOf(s,e)*emp.hc).toFixed(2)),status:'auto',tipo:'cena'});
+        asignados.add(emp.id); hrsMap[emp.id]=(hrsMap[emp.id]||0)+hrsOf(s,e); added++;
+      });
+      if(empCena.length<nCenaExtra) warnings.push(`${ds} cena: ${empCena.length}/${nCenaExtra}`);
   }
+
   save();
-  const warnTxt=warnings.length>0?`\n⚠ ${warnings.length} días sin cobertura completa`:'';
+  const warnTxt=warnings.length>0?`\n⚠ ${warnings.length} días con cobertura incompleta`:'';
   flash(`✓ ${added} turnos generados${warnTxt}`);
-  if(warnings.length>0)console.warn('Cobertura incompleta:', warnings);
+  if(warnings.length>0)console.warn('Cobertura incompleta:',warnings);
   go('schedule');
 }
 
@@ -1227,13 +1273,13 @@ function autoplanMdl(){
     <div class="modal-header"><h3 class="modal-title"><i class="fa fa-wand-magic-sparkles"></i> Autoplanificar — ${mName}</h3></div>
     <div class="modal-body">
       <div style="background:var(--bg3);border-radius:8px;padding:12px;font-size:12px;color:var(--text2);margin-bottom:12px">
-        <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:5px 16px;align-items:center">
-          <strong style="color:var(--text)">Día</strong><strong style="color:var(--text)">Comida (10-18:30)</strong><strong style="color:var(--text)">Cena (19-01:30)</strong>
-          <span>Lun/Mar</span><span>4 personas</span><span>4 personas</span>
-          <span>Mié/Jue</span><span>5 personas</span><span>8 personas</span>
-          <span>Viernes</span><span>4 personas</span><span>6 personas</span>
-          <span>Sábado</span><span>5 personas</span><span>9 personas</span>
-          <span>Domingo</span><span>6 personas</span><span>7 personas</span>
+        <div style="display:grid;grid-template-columns:auto 1fr 1fr 1fr;gap:5px 16px;align-items:center">
+          <strong style="color:var(--text)">Día</strong><strong style="color:var(--text)">Partido (12-16/20-00:30)</strong><strong style="color:var(--text)">Solo comida</strong><strong style="color:var(--text)">Solo cena</strong>
+          <span>Lun/Mar</span><span>2</span><span>2</span><span>2</span>
+          <span>Mié/Jue</span><span>5</span><span>—</span><span>3</span>
+          <span>Viernes</span><span>4</span><span>—</span><span>2</span>
+          <span>Sábado</span><span>5</span><span>—</span><span>4</span>
+          <span>Domingo</span><span>6</span><span>—</span><span>1</span>
         </div>
       </div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:10px;display:flex;flex-direction:column;gap:4px">
@@ -2155,6 +2201,176 @@ function parseLogirestText(text, filename){
 }
 
 // ── Página principal de Stocks ───────────────────────────
+function pgScheduleConfig(){
+  const cfg=getPlanConfig();
+  const r=cfg.rules;
+  const sh=cfg.shifts;
+  const days=[
+    {dow:1,label:'Lunes'},{dow:2,label:'Martes'},{dow:3,label:'Miércoles'},
+    {dow:4,label:'Jueves'},{dow:5,label:'Viernes'},{dow:6,label:'Sábado'},{dow:0,label:'Domingo'}
+  ];
+
+  // Encargados selector
+  const empOpts=DB.employees.filter(e=>e.active).map(e=>
+    `<option value="${e.id}"${cfg.encargados.includes(e.id)?' selected':''}>${e.name}</option>`
+  ).join('');
+
+  // Tabla de reglas por día
+  const rulesRows=days.map(({dow,label})=>`
+    <tr>
+      <td style="font-weight:600;color:var(--text)">${label}</td>
+      <td><input type="number" min="0" max="20" value="${r[dow].c}" style="${iStyle()}"
+        onchange="updatePlanRule(${dow},'c',+this.value)"></td>
+      <td><input type="number" min="0" max="20" value="${r[dow].n}" style="${iStyle()}"
+        onchange="updatePlanRule(${dow},'n',+this.value)"></td>
+      <td><input type="number" min="0" max="20" value="${r[dow].p}" style="${iStyle()}"
+        onchange="updatePlanRule(${dow},'p',+this.value)"></td>
+      <td style="font-family:var(--mono);font-size:12px;color:var(--teal)">
+        ${r[dow].p} partido + ${Math.max(0,r[dow].c-r[dow].p)} comida + ${Math.max(0,r[dow].n-r[dow].p)} cena
+        = <strong>${Math.max(0,r[dow].c-r[dow].p)+Math.max(0,r[dow].n-r[dow].p)+r[dow].p}</strong> personas
+      </td>
+    </tr>`).join('');
+
+  function iStyle(){return 'width:60px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-family:var(--mono);font-size:13px;text-align:center';}
+  function tInput(val,key1,key2){return `<input type="time" value="${val}" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-family:var(--mono);font-size:13px" onchange="updatePlanShift('${key1}','${key2}',this.value)">`;}
+
+  // No coincide pares
+  const noPairs=cfg.noCoincide.map((pair,i)=>`
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <select style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px" onchange="updateNoPair(${i},0,+this.value)">
+        ${DB.employees.filter(e=>e.active).map(e=>`<option value="${e.id}"${e.id===pair[0]?' selected':''}>${e.name}</option>`).join('')}
+      </select>
+      <span style="color:var(--text3)">≠</span>
+      <select style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px" onchange="updateNoPair(${i},1,+this.value)">
+        ${DB.employees.filter(e=>e.active).map(e=>`<option value="${e.id}"${e.id===pair[1]?' selected':''}>${e.name}</option>`).join('')}
+      </select>
+      <button class="btn btn-danger btn-sm btn-icon" onclick="removeNoPair(${i})"><i class="fa fa-trash"></i></button>
+    </div>`).join('');
+
+  return`<div class="page-header">
+    <div><h2><i class="fa fa-sliders"></i> Configuración de turnos</h2>
+    <p>Reglas para la planificación automática del cuadrante</p></div>
+    <div class="page-actions">
+      <button class="btn btn-primary btn-sm" onclick="savePlanConfig()"><i class="fa fa-floppy-disk"></i> Guardar cambios</button>
+    </div>
+  </div>
+  <div class="page-body" style="display:flex;flex-direction:column;gap:16px">
+
+    <!-- Horas de turno -->
+    <div class="card">
+      <div class="card-header"><span class="card-title"><i class="fa fa-clock"></i> Horarios de turno</span></div>
+      <div style="padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px">
+        <div>
+          <div style="font-size:12px;color:var(--text3);margin-bottom:6px">🍽 Turno comida (continuo)</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            ${tInput(sh.comida.start,'comida','start')}
+            <span style="color:var(--text3)">→</span>
+            ${tInput(sh.comida.end,'comida','end')}
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--text3);margin-bottom:6px">🌙 Turno cena (continuo)</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            ${tInput(sh.cena.start,'cena','start')}
+            <span style="color:var(--text3)">→</span>
+            ${tInput(sh.cena.end,'cena','end')}
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--text3);margin-bottom:6px">🔀 Turno partido — 1ª parte</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            ${tInput(sh.partido1.start,'partido1','start')}
+            <span style="color:var(--text3)">→</span>
+            ${tInput(sh.partido1.end,'partido1','end')}
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--text3);margin-bottom:6px">🔀 Turno partido — 2ª parte</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            ${tInput(sh.partido2.start,'partido2','start')}
+            <span style="color:var(--text3)">→</span>
+            ${tInput(sh.partido2.end,'partido2','end')}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Personas por día -->
+    <div class="card">
+      <div class="card-header"><span class="card-title"><i class="fa fa-users"></i> Personal necesario por día</span>
+        <span style="font-size:11px;color:var(--text3)">El partido cuenta para comida y cena → minimiza total</span>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Día</th>
+          <th style="text-align:center">Comida (total)</th>
+          <th style="text-align:center">Cena (total)</th>
+          <th style="text-align:center">Partidos</th>
+          <th>Resultado</th>
+        </tr></thead>
+        <tbody>${rulesRows}</tbody>
+      </table></div>
+    </div>
+
+    <!-- Encargados y restricciones -->
+    <div class="card">
+      <div class="card-header"><span class="card-title"><i class="fa fa-user-tie"></i> Encargados</span></div>
+      <div style="padding:16px">
+        <p style="font-size:12px;color:var(--text3);margin-bottom:10px">Los encargados nunca se asignan al mismo turno. Selecciona quiénes son:</p>
+        <select multiple style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:8px;border-radius:6px;font-size:13px;min-width:250px;height:120px" id="encSel" onchange="updateEncargados()">
+          ${DB.employees.filter(e=>e.active).map(e=>`<option value="${e.id}"${cfg.encargados.includes(e.id)?' selected':''}>${e.name}</option>`).join('')}
+        </select>
+        <p style="font-size:11px;color:var(--text3);margin-top:6px">Mantén Cmd/Ctrl para seleccionar varios</p>
+      </div>
+    </div>
+
+    <!-- Pares que no pueden coincidir -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title"><i class="fa fa-ban"></i> Empleados que no pueden coincidir en el mismo turno</span>
+        <button class="btn btn-secondary btn-sm" onclick="addNoPair()"><i class="fa fa-plus"></i> Añadir regla</button>
+      </div>
+      <div style="padding:16px" id="noPairsContainer">
+        ${cfg.noCoincide.length ? noPairs : '<p style="font-size:13px;color:var(--text3)">Sin restricciones configuradas.</p>'}
+      </div>
+    </div>
+
+  </div>`;
+}
+
+function updatePlanRule(dow,field,val){
+  getPlanConfig().rules[dow][field]=val;
+  save();
+  go('scheduleConfig');
+}
+function updatePlanShift(turno,field,val){
+  getPlanConfig().shifts[turno][field]=val;
+  save();
+}
+function updateEncargados(){
+  const sel=document.getElementById('encSel');
+  if(!sel)return;
+  getPlanConfig().encargados=[...sel.selectedOptions].map(o=>parseInt(o.value));
+  save();
+}
+function addNoPair(){
+  const emps=DB.employees.filter(e=>e.active);
+  if(emps.length<2)return;
+  getPlanConfig().noCoincide.push([emps[0].id,emps[1].id]);
+  save(); go('scheduleConfig');
+}
+function removeNoPair(i){
+  getPlanConfig().noCoincide.splice(i,1);
+  save(); go('scheduleConfig');
+}
+function updateNoPair(i,pos,val){
+  getPlanConfig().noCoincide[i][pos]=val;
+  save();
+}
+function savePlanConfig(){
+  save(); flash('✓ Configuración guardada');
+}
+
 function pgStocks(){
   checkStockAlarm();
   const items=DB.stockItems;
@@ -2348,14 +2564,14 @@ function pgReports(){
 // ═══════════════════════════════════════════════════════════
 function exportBackup(){
   try{
-    const p={};['employees','shifts','vacations','alerts','bankMovements','fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory','stockItems','stockOrders','stockSnapshots'].forEach(k=>{p[k]=DB[k];});
+    const p={};['employees','shifts','vacations','alerts','bankMovements','fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory','stockItems','stockOrders','stockSnapshots','planConfig'].forEach(k=>{p[k]=DB[k];});
     p._v='biconcepto_v3';p._t=new Date().toISOString();
     const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(p,null,2)],{type:'application/json'}));a.download='backup_biconcepto_'+today()+'.json';a.click();
   }catch(e){alert('Error: '+e.message);}
 }
 function importBackup(){
   const inp=document.createElement('input');inp.type='file';inp.accept='.json';
-  inp.onchange=e=>{const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p._v){alert('Archivo no válido');return;}['employees','shifts','vacations','alerts','bankMovements','fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory','stockItems','stockOrders','stockSnapshots'].forEach(k=>{if(p[k]!==undefined)DB[k]=p[k];});save();location.reload();}catch(err){alert('Error: '+err.message);}};r.readAsText(e.target.files[0]);};inp.click();
+  inp.onchange=e=>{const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p._v){alert('Archivo no válido');return;}['employees','shifts','vacations','alerts','bankMovements','fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory','stockItems','stockOrders','stockSnapshots','planConfig'].forEach(k=>{if(p[k]!==undefined)DB[k]=p[k];});save();location.reload();}catch(err){alert('Error: '+err.message);}};r.readAsText(e.target.files[0]);};inp.click();
 }
 function clearStorage(){if(!confirm('¿Borrar TODOS los datos?\n\nNo se puede deshacer.'))return;_store.removeItem('biconcepto_v3');location.reload();}
 
