@@ -1304,6 +1304,7 @@ function launchApp(){
   updateBadge();
   setupNav();
   checkStockAlarm();
+  checkStaffingAlarm();
   go('dashboard');
 }
 
@@ -2942,7 +2943,21 @@ function pgAlerts(){
   const open=DB.alerts.filter(a=>!a.done),done=DB.alerts.filter(a=>a.done);
   return`<div class="page-header"><div><h2>Alertas</h2><p>${open.length} activas</p></div><div class="page-actions"><button class="btn btn-secondary btn-sm" onclick="DB.alerts.forEach(a=>a.done=true);save();updateBadge();go('alerts')">Resolver todas</button></div></div>
   <div class="page-body">
-    ${open.map(a=>`<div class="alert-item ${a.sev}" style="margin-bottom:8px"><i class="fa fa-triangle-exclamation alert-icon"></i><div style="flex:1"><div class="alert-msg">${a.msg}</div></div><button class="btn btn-secondary btn-sm" onclick="DB.alerts.find(x=>x.id===${a.id}).done=true;save();updateBadge();go('alerts')">Resolver</button></div>`).join('')||'<div class="empty-state"><i class="fa fa-circle-check"></i><p>Sin alertas activas</p></div>'}
+    ${open.map(a=>`<div class="alert-item ${a.sev}" style="margin-bottom:8px">
+      <i class="fa fa-${a.sev==='warning'?'triangle-exclamation':'circle-info'} alert-icon"></i>
+      <div style="flex:1">
+        <div class="alert-msg">${a.msg}</div>
+        ${a.soluciones&&a.soluciones.length?`
+        <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.1);padding-top:8px">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;opacity:.7;margin-bottom:4px">Posibles acciones:</div>
+          ${a.soluciones.map((s,i)=>`<div style="display:flex;gap:6px;font-size:12px;margin-bottom:3px;opacity:.9">
+            <span style="opacity:.5">${i+1}.</span><span>${s}</span>
+          </div>`).join('')}
+          ${a.mStr?`<a href="#" onclick="go('optimalStaff');_store.setItem('opt_m','${parseInt(a.mStr.split('-')[1])}');_store.setItem('opt_y','${a.mStr.split('-')[0]}');closeModal&&closeModal()" style="font-size:11px;color:inherit;opacity:.7;margin-top:6px;display:inline-block">→ Ver análisis completo en Plantilla óptima</a>`:''}
+        </div>`:``}
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="DB.alerts.find(x=>x.id===${a.id}).done=true;save();updateBadge();go('alerts')">Resolver</button>
+    </div>`).join('')||'<div class="empty-state"><i class="fa fa-circle-check"></i><p>Sin alertas activas</p></div>'}
     ${done.length?`<div style="margin-top:20px;color:var(--text3);font-size:12px;margin-bottom:8px">RESUELTAS</div>${done.map(a=>`<div class="alert-item info" style="margin-bottom:6px;opacity:.5"><i class="fa fa-check-circle alert-icon"></i><div class="alert-msg">${a.msg}</div></div>`).join('')}`:''}
   </div>`;
 }
@@ -3303,6 +3318,83 @@ function afJibble(){
 // ═══════════════════════════════════════════════════════════
 // MÓDULO DE STOCKS — Logirest + Pedidos + Alarma mensual
 // ═══════════════════════════════════════════════════════════
+
+// ── Alarma de plantilla ──────────────────────────────────
+function checkStaffingAlarm(){
+  const OBJ_MIN=25, OBJ_MAX=35, COSTE_HR=12;
+  const cfg=getPlanConfig();
+  const now=new Date();
+
+  [0,1].forEach(offset=>{
+    const d=new Date(now.getFullYear(), now.getMonth()+offset+1, 0);
+    const y=d.getFullYear(), m=d.getMonth()+1;
+    const mStr=`${y}-${String(m).padStart(2,'0')}`;
+    const mLabel=d.toLocaleString('es-ES',{month:'long',year:'numeric'});
+    const key=`staff_${mStr}`;
+    if(DB.alerts.some(a=>a._sk===key&&!a.done))return;
+
+    const days=new Date(y,m,0).getDate();
+    let hrsTotales=0;
+    for(let day=1;day<=days;day++){
+      const dow=new Date(`${mStr}-${String(day).padStart(2,'0')}`).getDay();
+      const rule=cfg.rules[dow], sh=cfg.shifts;
+      hrsTotales+=rule.p*(hrsOf(sh.partido1.start,sh.partido1.end)+hrsOf(sh.partido2.start,sh.partido2.end));
+      hrsTotales+=Math.max(0,rule.c-rule.p)*hrsOf(sh.comida.start,sh.comida.end);
+      hrsTotales+=Math.max(0,rule.n-rule.p)*hrsOf(sh.cena.start,sh.cena.end);
+    }
+
+    const activos=DB.employees.filter(e=>e.active&&e.sick===0);
+    const hrsDisponibles=activos.reduce((a,e)=>a+(e.wh*4.33),0);
+    const vacHrs=DB.vacations.filter(v=>v.start.startsWith(mStr)||v.end.startsWith(mStr)||(v.start<mStr&&v.end>mStr+'-31'))
+      .reduce((a,v)=>{
+        const e=DB.employees.find(x=>x.id===v.employee_id); if(!e)return a;
+        let cur=new Date(Math.max(new Date(v.start),new Date(`${mStr}-01`)));
+        const end=new Date(Math.min(new Date(v.end),new Date(y,m,0)));
+        let ds=0; while(cur<=end){ds++;cur.setDate(cur.getDate()+1);}
+        return a+(e.wh/5)*ds;
+      },0);
+    const hrsEfectivas=hrsDisponibles-vacHrs;
+    const deficit=hrsTotales-hrsEfectivas;
+    const pctDesvio=hrsTotales>0?Math.round(Math.abs(deficit)/hrsTotales*100):0;
+    if(pctDesvio<10)return;
+
+    const esDeficit=deficit>0;
+    const hrsExtra=Math.abs(Math.round(deficit));
+    const nPersonas40=Math.ceil(hrsExtra/(40*4.33));
+    const nPersonas20=Math.ceil(hrsExtra/(20*4.33));
+    const costeExtra=Math.round(hrsExtra*COSTE_HR);
+    const ventasEst=Array.from({length:days},(_,i)=>{
+      const ds=`${mStr}-${String(i+1).padStart(2,'0')}`;
+      return salesOn(ds)||estSales(ds)||0;
+    }).reduce((a,b)=>a+b,0);
+    const ratioLaboral=ventasEst>0?Math.round(hrsTotales*COSTE_HR/ventasEst*100):0;
+
+    let msg, sev, soluciones;
+    if(esDeficit){
+      sev='warning';
+      msg=`Plantilla insuficiente en ${mLabel}: faltan ~${hrsExtra}h (${pctDesvio}% del total necesario)`;
+      soluciones=[
+        `Horas extra: distribuir ${hrsExtra}h entre los ${activos.length} empleados activos (~${Math.ceil(hrsExtra/activos.length)}h/persona)`,
+        `Contratar refuerzo: ${nPersonas20} persona${nPersonas20>1?'s':''} a 20h/mes — coste estimado ${eur(costeExtra)}`,
+        `Revisar vacaciones: si hay empleados de vacaciones en ${mLabel}, valorar retrasar o fraccionar`,
+        `Ajustar reglas en Config. turnos para reducir personal mínimo si la demanda lo permite`,
+      ];
+    } else {
+      sev='info';
+      msg=`Plantilla sobredimensionada en ${mLabel}: sobran ~${hrsExtra}h (${pctDesvio}% sobre lo necesario)`;
+      soluciones=[
+        `Adelantar vacaciones: es buen momento para que el equipo gaste días en ${mLabel}`,
+        `Reducir turnos opcionales o cerrar antes en días de baja afluencia`,
+        ratioLaboral>0&&ratioLaboral<OBJ_MIN?`Ratio laboral muy bajo (${ratioLaboral}%) — valorar ampliar horario de apertura para aumentar ventas`:`Revisar Config. turnos si el personal mínimo por día está sobredimensionado`,
+        `A medio plazo: valorar no renovar ${nPersonas20} contrato${nPersonas20>1?'s':''} de 20h al vencer`,
+      ].filter(Boolean);
+    }
+
+    DB.alerts.push({id:maxId(DB.alerts),sev,msg,soluciones,mStr,done:false,_sk:key,ts:now.toLocaleDateString('es-ES')});
+  });
+
+  save(); updateBadge();
+}
 
 // ── Alarma mensual de stock real ──────────────────────────
 function checkStockAlarm(){
