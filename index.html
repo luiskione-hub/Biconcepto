@@ -1027,6 +1027,225 @@ const SALES_HISTORY_SEED = [
   {"date":"2026-05-29","amount":4062.9,"_src":"hist"}
 ];
 
+const FORECAST_SEED = [
+  {"date":"2026-06-01","amount":1653.81},
+  {"date":"2026-06-02","amount":1389.09},
+  {"date":"2026-06-03","amount":3586.92},
+  {"date":"2026-06-04","amount":3711.75},
+  {"date":"2026-06-05","amount":2832.56},
+  {"date":"2026-06-06","amount":3755.58},
+  {"date":"2026-06-07","amount":2122.95},
+  {"date":"2026-06-08","amount":1853.79},
+  {"date":"2026-06-09","amount":1911.01},
+  {"date":"2026-06-10","amount":3645.51},
+  {"date":"2026-06-11","amount":3702.84},
+  {"date":"2026-06-12","amount":3082.46},
+  {"date":"2026-06-13","amount":2751.54},
+  {"date":"2026-06-14","amount":2343.13},
+  {"date":"2026-06-15","amount":2692.28},
+  {"date":"2026-06-16","amount":1680.23},
+  {"date":"2026-06-17","amount":3355.32},
+  {"date":"2026-06-18","amount":2874.55},
+  {"date":"2026-06-19","amount":2915.64},
+  {"date":"2026-06-20","amount":3128.09},
+  {"date":"2026-06-21","amount":2475.1},
+  {"date":"2026-06-22","amount":1941.78},
+  {"date":"2026-06-23","amount":2101.55},
+  {"date":"2026-06-24","amount":3760.85},
+  {"date":"2026-06-25","amount":3469.92},
+  {"date":"2026-06-26","amount":2988.45},
+  {"date":"2026-06-27","amount":3141.93},
+  {"date":"2026-06-28","amount":2173.97},
+  {"date":"2026-06-29","amount":1986.55},
+  {"date":"2026-06-30","amount":1578.33},
+  {"date":"2026-07-01","amount":3372.97},
+  {"date":"2026-07-02","amount":2535.55},
+  {"date":"2026-07-03","amount":2733.92},
+  {"date":"2026-07-04","amount":2404.32},
+  {"date":"2026-07-05","amount":2225.59},
+  {"date":"2026-07-06","amount":1994.9},
+  {"date":"2026-07-07","amount":1663.08},
+  {"date":"2026-07-08","amount":3297.16},
+  {"date":"2026-07-09","amount":2929.23},
+  {"date":"2026-07-10","amount":2284.7},
+  {"date":"2026-07-11","amount":2588.24},
+  {"date":"2026-07-12","amount":2078.38},
+  {"date":"2026-07-13","amount":1925.41},
+  {"date":"2026-07-14","amount":1694.8},
+  {"date":"2026-07-15","amount":3534.75},
+  {"date":"2026-07-16","amount":2623.04},
+  {"date":"2026-07-17","amount":2186.58},
+  {"date":"2026-07-18","amount":2528.78},
+  {"date":"2026-07-19","amount":2110.2},
+  {"date":"2026-07-20","amount":1804.88},
+  {"date":"2026-07-21","amount":2069.34},
+  {"date":"2026-07-22","amount":3098.92},
+  {"date":"2026-07-23","amount":2896.47},
+  {"date":"2026-07-24","amount":2649.05},
+  {"date":"2026-07-25","amount":2450.91},
+  {"date":"2026-07-26","amount":1805.62},
+  {"date":"2026-07-27","amount":2341.2},
+  {"date":"2026-07-28","amount":2308.23},
+  {"date":"2026-07-29","amount":3758.03},
+  {"date":"2026-07-30","amount":3502.63},
+  {"date":"2026-07-31","amount":2364.66},
+  {"date":"2026-08-01","amount":2567.91},
+  {"date":"2026-08-02","amount":2078.41},
+  {"date":"2026-08-03","amount":2065.88},
+  {"date":"2026-08-04","amount":2100.33},
+  {"date":"2026-08-05","amount":3209.93},
+  {"date":"2026-08-06","amount":3046.81},
+  {"date":"2026-08-07","amount":2492.88},
+  {"date":"2026-08-08","amount":2614.18},
+  {"date":"2026-08-09","amount":1939.82},
+  {"date":"2026-08-10","amount":2502.44},
+  {"date":"2026-08-11","amount":1771.06},
+  {"date":"2026-08-12","amount":3762.41},
+  {"date":"2026-08-13","amount":3387.73},
+  {"date":"2026-08-14","amount":2142.71},
+  {"date":"2026-08-15","amount":2546.78},
+  {"date":"2026-08-16","amount":1918.76},
+  {"date":"2026-08-17","amount":2217.47},
+  {"date":"2026-08-18","amount":1804.64},
+  {"date":"2026-08-19","amount":3546.32},
+  {"date":"2026-08-20","amount":3033.09},
+  {"date":"2026-08-21","amount":2433.56},
+  {"date":"2026-08-22","amount":2435.72},
+  {"date":"2026-08-23","amount":1760.99},
+  {"date":"2026-08-24","amount":2219.18},
+  {"date":"2026-08-25","amount":1739.73},
+  {"date":"2026-08-26","amount":3308.2},
+  {"date":"2026-08-27","amount":3203.68},
+  {"date":"2026-08-28","amount":2692.96},
+  {"date":"2026-08-29","amount":2061.5},
+  {"date":"2026-08-30","amount":2031.17},
+  {"date":"2026-08-31","amount":1928.75},
+  {"date":"2026-09-01","amount":1875.1},
+  {"date":"2026-09-02","amount":3337.67},
+  {"date":"2026-09-03","amount":3074.76},
+  {"date":"2026-09-04","amount":3286.01},
+  {"date":"2026-09-05","amount":2675.27},
+  {"date":"2026-09-06","amount":1677.58},
+  {"date":"2026-09-07","amount":2396.98},
+  {"date":"2026-09-08","amount":1199.6},
+  {"date":"2026-09-09","amount":2877.77},
+  {"date":"2026-09-10","amount":2489.98},
+  {"date":"2026-09-11","amount":2325.54},
+  {"date":"2026-09-12","amount":3510.17},
+  {"date":"2026-09-13","amount":1963.52},
+  {"date":"2026-09-14","amount":1392.09},
+  {"date":"2026-09-15","amount":1011.51},
+  {"date":"2026-09-16","amount":2800.85},
+  {"date":"2026-09-17","amount":2436.1},
+  {"date":"2026-09-18","amount":2604.02},
+  {"date":"2026-09-19","amount":3034.75},
+  {"date":"2026-09-20","amount":2137.42},
+  {"date":"2026-09-21","amount":1038.5},
+  {"date":"2026-09-22","amount":942.13},
+  {"date":"2026-09-23","amount":2350.87},
+  {"date":"2026-09-24","amount":1670.55},
+  {"date":"2026-09-25","amount":2709.01},
+  {"date":"2026-09-26","amount":2899.09},
+  {"date":"2026-09-27","amount":1887.47},
+  {"date":"2026-09-28","amount":1059.62},
+  {"date":"2026-09-29","amount":749.32},
+  {"date":"2026-09-30","amount":2353.69},
+  {"date":"2026-10-01","amount":1995.88},
+  {"date":"2026-10-02","amount":2840.47},
+  {"date":"2026-10-03","amount":3461.95},
+  {"date":"2026-10-04","amount":2161.45},
+  {"date":"2026-10-05","amount":1123.34},
+  {"date":"2026-10-06","amount":959.18},
+  {"date":"2026-10-07","amount":2475.16},
+  {"date":"2026-10-08","amount":1866.2},
+  {"date":"2026-10-09","amount":2639.91},
+  {"date":"2026-10-10","amount":2721.94},
+  {"date":"2026-10-11","amount":2541.62},
+  {"date":"2026-10-12","amount":1204.87},
+  {"date":"2026-10-13","amount":1058.04},
+  {"date":"2026-10-14","amount":2509.34},
+  {"date":"2026-10-15","amount":2009.91},
+  {"date":"2026-10-16","amount":2668.01},
+  {"date":"2026-10-17","amount":3294.77},
+  {"date":"2026-10-18","amount":1895.28},
+  {"date":"2026-10-19","amount":1289.33},
+  {"date":"2026-10-20","amount":970.42},
+  {"date":"2026-10-21","amount":2585.54},
+  {"date":"2026-10-22","amount":2347.39},
+  {"date":"2026-10-23","amount":2794.76},
+  {"date":"2026-10-24","amount":2529.27},
+  {"date":"2026-10-25","amount":1733.24},
+  {"date":"2026-10-26","amount":984.77},
+  {"date":"2026-10-27","amount":856.08},
+  {"date":"2026-10-28","amount":1448.49},
+  {"date":"2026-10-29","amount":2348.45},
+  {"date":"2026-10-30","amount":3219.87},
+  {"date":"2026-10-31","amount":2149.95},
+  {"date":"2026-11-01","amount":1799.13},
+  {"date":"2026-11-02","amount":1239.62},
+  {"date":"2026-11-03","amount":1000.08},
+  {"date":"2026-11-04","amount":1565.58},
+  {"date":"2026-11-05","amount":3389.25},
+  {"date":"2026-11-06","amount":2911.41},
+  {"date":"2026-11-07","amount":3115.91},
+  {"date":"2026-11-08","amount":1809.4},
+  {"date":"2026-11-09","amount":1117.11},
+  {"date":"2026-11-10","amount":995.37},
+  {"date":"2026-11-11","amount":2563.75},
+  {"date":"2026-11-12","amount":2028.69},
+  {"date":"2026-11-13","amount":1663.59},
+  {"date":"2026-11-14","amount":2021.22},
+  {"date":"2026-11-15","amount":1491.14},
+  {"date":"2026-11-16","amount":1081.49},
+  {"date":"2026-11-17","amount":1135.6},
+  {"date":"2026-11-18","amount":2099.14},
+  {"date":"2026-11-19","amount":1861.8},
+  {"date":"2026-11-20","amount":2552.44},
+  {"date":"2026-11-21","amount":3605.59},
+  {"date":"2026-11-22","amount":1879.82},
+  {"date":"2026-11-23","amount":1046.06},
+  {"date":"2026-11-24","amount":801.83},
+  {"date":"2026-11-25","amount":2362.93},
+  {"date":"2026-11-26","amount":2470.84},
+  {"date":"2026-11-27","amount":3360.15},
+  {"date":"2026-11-28","amount":3781.68},
+  {"date":"2026-11-29","amount":1229.61},
+  {"date":"2026-11-30","amount":1166.93},
+  {"date":"2026-12-01","amount":568.04},
+  {"date":"2026-12-02","amount":1876.78},
+  {"date":"2026-12-03","amount":2074.41},
+  {"date":"2026-12-04","amount":1996.76},
+  {"date":"2026-12-05","amount":2934.15},
+  {"date":"2026-12-06","amount":1904.95},
+  {"date":"2026-12-07","amount":1331.71},
+  {"date":"2026-12-08","amount":707.08},
+  {"date":"2026-12-09","amount":1461.04},
+  {"date":"2026-12-10","amount":2753.13},
+  {"date":"2026-12-11","amount":1621.11},
+  {"date":"2026-12-12","amount":1932.48},
+  {"date":"2026-12-13","amount":1364.4},
+  {"date":"2026-12-14","amount":1695.81},
+  {"date":"2026-12-15","amount":663.14},
+  {"date":"2026-12-16","amount":2165.08},
+  {"date":"2026-12-17","amount":2965.54},
+  {"date":"2026-12-18","amount":2441.23},
+  {"date":"2026-12-19","amount":2917.78},
+  {"date":"2026-12-20","amount":719.02},
+  {"date":"2026-12-21","amount":985.83},
+  {"date":"2026-12-22","amount":1243.76},
+  {"date":"2026-12-23","amount":1641.97},
+  {"date":"2026-12-24","amount":1428.87},
+  {"date":"2026-12-25","amount":2204.14},
+  {"date":"2026-12-26","amount":1402.37},
+  {"date":"2026-12-27","amount":1926.17},
+  {"date":"2026-12-28","amount":1711.53},
+  {"date":"2026-12-29","amount":2289.92},
+  {"date":"2026-12-30","amount":1594.8},
+  {"date":"2026-12-31","amount":1695.82}
+];
+
+const TREND_FACTORS = {"byDow": {"4": 1.0127, "5": 0.7984, "6": 0.8145, "0": 0.6622, "2": 0.6987, "3": 0.9725, "1": 0.7595}, "global": 0.8169, "updatedAt": "2026-05", "basedOnDays": 60};
+
 const JMAP = {
   'Aya El Kabaj':'Aya El Kabaj','Brahim Motjar':'Brahim Motjar','Dafne De La Pena':'Dafne De La Pena',
   'Dikra Abdelnevi':'Dikra Abdelnevi','Fátima Embark':'Fátima Embark','Hanan Abdelnevi':'Hanan Abdelnevi',
@@ -1137,87 +1356,50 @@ const eur   = n  => new Intl.NumberFormat('es-ES',{style:'currency',currency:'EU
 const salesOn = ds => DB.salesHistory.filter(s=>s.date===ds).reduce((a,s)=>a+(s.amount||0),0);
 const laborOn = ds => DB.shifts.filter(s=>s.date===ds).reduce((a,s)=>a+(s.cost||0),0);
 
-// estSales: previsión de ventas basada en año anterior + tendencia real
-// Modelo: Previsión = Mismo_día_año_anterior × Factor_tendencia
-// Factor tendencia = (ventas últimas 4 semanas) / (mismas semanas año anterior)
+// estSales: previsión con factores de tendencia por día de semana
+// Modelo: ventas_mismo_día_año_anterior × factor_tendencia_por_dow
+// Fuentes en orden de prioridad:
+//   1. Dato real en salesHistory
+//   2. FORECAST_SEED (previsiones calculadas con datos reales)
+//   3. Mismo día año anterior × factor dow
+//   4. Media ponderada del histórico por dow
+//   5. HOURLY fallback
 const estSales = ds => {
-  const dow = new Date(ds).getDay();
+  // Dato real
+  const real = salesOn(ds);
+  if(real > 0) return real;
 
-  // 1. Buscar el mismo día de semana del año anterior (±3 días para encontrar el lunes más cercano)
+  // Previsión pre-calculada
+  const seed = (typeof FORECAST_SEED !== 'undefined') ? FORECAST_SEED.find(f=>f.date===ds) : null;
+  if(seed) return seed.amount;
+
+  // Calcular en tiempo real: mismo dow año anterior × factor tendencia
+  const dow = new Date(ds).getDay(); // app: 0=Dom,1=Lun...
+  const factors = (typeof TREND_FACTORS !== 'undefined') ? TREND_FACTORS : null;
+  const factor = factors ? (factors.byDow[String(dow)] || factors.global || 0.83) : 0.83;
+
+  // Buscar mismo día de semana del año anterior
   const dObj = new Date(ds);
   const lyBase = new Date(dObj);
   lyBase.setFullYear(lyBase.getFullYear() - 1);
-  // Ajustar al mismo día de semana del año anterior
   const lyDow = lyBase.getDay();
-  const diffDow = dow - lyDow;
-  lyBase.setDate(lyBase.getDate() + diffDow);
+  lyBase.setDate(lyBase.getDate() + (dow - lyDow));
   const lyDs = lyBase.toISOString().slice(0,10);
-
   const lyVenta = salesOn(lyDs);
+  if(lyVenta > 0) return Math.round(lyVenta * factor);
 
-  // 2. Calcular factor de tendencia: últimas 4-8 semanas reales vs mismo período año anterior
-  const t = today();
-  const recentSame = [], recentSameLY = [];
-  for(let w = 1; w <= 8; w++){
-    const dR = new Date(t);
-    dR.setDate(dR.getDate() - w*7);
-    // Ajustar al mismo dow
-    const dRDow = dR.getDay();
-    dR.setDate(dR.getDate() + (dow - dRDow));
-    const dsR = dR.toISOString().slice(0,10);
-    if(dsR >= ds) continue; // no usar días futuros
-
-    const vR = salesOn(dsR);
-    if(vR > 0){
-      recentSame.push(vR);
-      // Mismo día año anterior
-      const dLY = new Date(dR);
-      dLY.setFullYear(dLY.getFullYear() - 1);
-      const dLYDow = dLY.getDay();
-      dLY.setDate(dLY.getDate() + (dow - dLYDow));
-      const dsLY = dLY.toISOString().slice(0,10);
-      const vLY = salesOn(dsLY);
-      if(vLY > 0) recentSameLY.push({actual:vR, ly:vLY});
-    }
-  }
-
-  // 3. Factor tendencia = media(actual/ly) de las semanas con datos en ambos años
-  let factor = 1;
-  if(recentSameLY.length >= 2){
-    factor = recentSameLY.reduce((a,p)=>a + p.actual/p.ly, 0) / recentSameLY.length;
-    // Limitar el factor entre 0.5 y 2.0 para evitar extrapolaciones extremas
-    factor = Math.max(0.5, Math.min(2.0, factor));
-  } else if(recentSame.length >= 2){
-    // Si no hay dato año anterior, usar tendencia lineal de las semanas recientes
-    // Pendiente simple: última semana vs primera del período
-    const last = recentSame[0], first = recentSame[recentSame.length-1];
-    factor = first > 0 ? last/first : 1;
-    factor = Math.max(0.7, Math.min(1.5, factor));
-  }
-
-  // 4. Aplicar factor al año anterior
-  if(lyVenta > 0){
-    return Math.round(lyVenta * factor);
-  }
-
-  // 5. Fallback: media ponderada por día de semana del histórico disponible
+  // Fallback: media ponderada por dow del histórico
   const mismosDow = DB.salesHistory.filter(s=>{
-    if(!s.date||s.date.length<10||s.date===ds)return false;
+    if(!s.date||s.date.length<10||s.date>=ds)return false;
     return new Date(s.date).getDay()===dow;
   }).sort((a,b)=>b.date.localeCompare(a.date));
-
   if(mismosDow.length >= 2){
-    // Ponderar más los recientes: peso decreciente
-    let sumPeso = 0, sumVal = 0;
-    mismosDow.slice(0,12).forEach((s,i)=>{
-      const peso = 1/(i+1);
-      sumVal += (s.amount||0)*peso;
-      sumPeso += peso;
-    });
-    return Math.round(sumVal/sumPeso);
+    let sumP=0, sumV=0;
+    mismosDow.slice(0,12).forEach((s,i)=>{ const p=1/(i+1); sumV+=(s.amount||0)*p; sumP+=p; });
+    return Math.round(sumV/sumP * factor);
   }
 
-  // 6. Último fallback: HOURLY hardcodeado
+  // Último fallback: HOURLY
   const d = dk(ds);
   return Object.values(HOURLY).reduce((a,v)=>a+(v[d]||0),0);
 };
@@ -1305,6 +1487,7 @@ function launchApp(){
   setupNav();
   checkStockAlarm();
   checkStaffingAlarm();
+  checkForecastAlarm();
   go('dashboard');
 }
 
@@ -2114,11 +2297,22 @@ function planFactor(ds){
 // Empleados disponibles para un día: activos, sin baja, sin vacaciones ese día
 function availableEmps(ds){
   const dow=new Date(ds).getDay();
-  const vacas=new Set(DB.vacations.filter(v=>v.start<=ds&&v.end>=ds).map(v=>v.employee_id));
+  const dsNorm=ds.slice(0,10);
+  // Solo excluir vacaciones aprobadas o sin estado (añadidas manualmente)
+  // Las 'pending' se ignoran hasta que el admin las apruebe
+  // Las 'rejected' siempre se ignoran
+  const vacas=new Set(DB.vacations.filter(v=>{
+    if(v.status==='rejected')return false;      // rechazadas: no bloquean
+    if(v.status==='pending')return false;        // pendientes: no bloquean aún
+    // status==='approved' o sin status (manual desde calendario): bloquean
+    const vStart=(v.start||'').slice(0,10);
+    const vEnd=(v.end||'').slice(0,10);
+    return vStart<=dsNorm && vEnd>=dsNorm;
+  }).map(v=>v.employee_id));
+
   return DB.employees.filter(e=>{
     if(!e.active||e.sick>0)return false;
     if(vacas.has(e.id))return false;
-    // Parciales con plantilla fija: solo disponibles los días que les toca
     if(e.type==='part'&&e.fs&&e.fs.length){
       if(!e.fs.some(f=>f.d===dow))return false;
     }
@@ -2513,13 +2707,68 @@ function saveTemplate(){
 
 // ─── VACATIONS ──────────────────────────────────────────────
 function pgVacations(){
-  return`<div class="page-header"><div><h2>Vacaciones y ausencias</h2></div><div class="page-actions"><button class="btn btn-primary" onclick="vacMdl()"><i class="fa fa-plus"></i> Nueva</button></div></div>
-  <div class="page-body"><div class="card"><div class="table-wrap"><table>
-    <thead><tr><th>Empleado</th><th>Desde</th><th>Hasta</th><th>Días</th><th>Estado</th><th></th></tr></thead>
-    <tbody>${DB.vacations.length?DB.vacations.map(v=>{const e=DB.employees.find(x=>x.id===v.employee_id);return`<tr><td class="td-bold">${e?e.name:'?'}</td><td>${v.start}</td><td>${v.end}</td><td class="td-mono">${v.days}</td><td><span class="badge badge-${v.status==='approved'?'green':'amber'}">${v.status==='approved'?'Aprobada':'Pendiente'}</span></td><td>${v.status==='pending'?`<button class="btn btn-success btn-sm" onclick="approveVac(${v.id})">Aprobar</button>`:''}<button class="btn btn-danger btn-sm btn-icon" style="margin-left:4px" onclick="DB.vacations=DB.vacations.filter(x=>x.id!==${v.id});save();go('vacations')"><i class="fa fa-trash"></i></button></td></tr>`;}).join(''):'<tr><td colspan="6" style="text-align:center;color:var(--text3)">Sin solicitudes</td></tr>'}</tbody>
-  </table></div></div></div>`;
+  const vacs=DB.vacations.slice().sort((a,b)=>b.start.localeCompare(a.start));
+  const pending=vacs.filter(v=>v.status==='pending').length;
+  const rows=vacs.length?vacs.map(v=>{
+    const e=DB.employees.find(x=>x.id===v.employee_id);
+    const days=v.days||Math.round((new Date(v.end)-new Date(v.start))/86400000)+1;
+    const st=v.status||'approved'; // sin status = aprobada (manual desde calendario)
+    const badge=st==='approved'?'<span class="badge badge-green">✓ Aprobada</span>':
+                 st==='rejected'?'<span class="badge badge-red">✗ Rechazada</span>':
+                 '<span class="badge badge-amber">⏳ Pendiente</span>';
+    const actions=`
+      ${st==='pending'?`
+        <button class="btn btn-primary btn-sm" onclick="approveVac(${v.id})"><i class="fa fa-check"></i> Aprobar</button>
+        <button class="btn btn-danger btn-sm" onclick="rejectVac(${v.id})"><i class="fa fa-xmark"></i> Rechazar</button>
+      `:''}
+      ${st==='approved'?`<button class="btn btn-secondary btn-sm btn-icon" onclick="rejectVac(${v.id})" title="Revocar aprobación"><i class="fa fa-rotate-left"></i></button>`:''}
+      ${st==='rejected'?`<button class="btn btn-secondary btn-sm btn-icon" onclick="approveVac(${v.id})" title="Aprobar"><i class="fa fa-check"></i></button>`:''}
+      <button class="btn btn-danger btn-sm btn-icon" onclick="if(confirm('¿Eliminar?')){DB.vacations=DB.vacations.filter(x=>x.id!==${v.id});save();go('vacations')}"><i class="fa fa-trash"></i></button>
+    `;
+    return`<tr>
+      <td class="td-bold">${e?e.name:'?'}</td>
+      <td>${v.start}</td><td>${v.end}</td>
+      <td class="td-mono">${days}d</td>
+      <td>${badge}</td>
+      <td><div style="display:flex;gap:4px;flex-wrap:wrap">${actions}</div></td>
+    </tr>`;
+  }).join(''):`<tr><td colspan="6" style="text-align:center;color:var(--text3)">Sin solicitudes de vacaciones</td></tr>`;
+
+  return`<div class="page-header">
+    <div><h2>Vacaciones y ausencias</h2><p>${vacs.length} registros · ${pending} pendientes de aprobar</p></div>
+    <div class="page-actions">
+      ${pending>0?`<button class="btn btn-primary btn-sm" onclick="approveAllVac()"><i class="fa fa-check-double"></i> Aprobar todas</button>`:''}
+      <button class="btn btn-primary btn-sm" onclick="vacMdl()"><i class="fa fa-plus"></i> Nueva</button>
+    </div>
+  </div>
+  <div class="page-body">
+    ${pending>0?`<div class="alert-item warning" style="margin-bottom:12px">
+      <i class="fa fa-triangle-exclamation alert-icon"></i>
+      <div><div class="alert-msg">${pending} vacaciones pendientes de aprobar</div>
+      <div class="alert-meta">El cuadrante automático solo respeta las vacaciones <strong>aprobadas</strong>. Aprueba las solicitudes antes de generar el cuadrante.</div></div>
+    </div>`:''}
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>Empleado</th><th>Desde</th><th>Hasta</th><th>Días</th><th>Estado</th><th>Acciones</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div></div>
+  </div>`;
 }
-function approveVac(id){const v=DB.vacations.find(x=>x.id===id);if(v)v.status='approved';save();go('vacations');}
+
+function approveVac(id){
+  const v=DB.vacations.find(x=>x.id===id);
+  if(v){v.status='approved';save();audit('vac_aprobada',`Vacaciones aprobadas: ${DB.employees.find(e=>e.id===v.employee_id)?.name} ${v.start}→${v.end}`);}
+  go('vacations');
+}
+function rejectVac(id){
+  const v=DB.vacations.find(x=>x.id===id);
+  if(v){v.status='rejected';save();audit('vac_rechazada',`Vacaciones rechazadas: ${DB.employees.find(e=>e.id===v.employee_id)?.name} ${v.start}→${v.end}`);}
+  go('vacations');
+}
+function approveAllVac(){
+  if(!confirm(`¿Aprobar todas las vacaciones pendientes?`))return;
+  DB.vacations.filter(v=>v.status==='pending').forEach(v=>v.status='approved');
+  save();flash('✓ Todas aprobadas');go('vacations');
+}
 function vacMdl(){
   modal(`<div class="modal">
     <div class="modal-header"><h3>Nueva solicitud</h3><button class="btn-close-modal" onclick="closeModal()"><i class="fa fa-xmark"></i></button></div>
@@ -3241,32 +3490,199 @@ function buildForecast(ds){
   return{ds,d,tS,tC:parseFloat(tC.toFixed(2)),tH,lp:tS>0?parseFloat((tC/tS*100).toFixed(1)):0,gf:parseFloat(gf.toFixed(2)),plan,shifts};
 }
 function pgForecast(){
-  const t=today(),plans=[];for(let i=0;i<7;i++){const d=new Date(t);d.setDate(d.getDate()+i);plans.push(buildForecast(d.toISOString().split('T')[0]));}
-  const wS=plans.reduce((a,p)=>a+p.tS,0),wC=plans.reduce((a,p)=>a+p.tC,0);
-  const best=plans.reduce((b,p)=>p.tS>b.tS?p:b);
-  return`<div class="page-header"><div><h2>Previsión de ventas</h2><p>Próximos 7 días · Hoy: ${dayN(t)}, ${t}</p></div></div>
-  <div class="page-body">
-    <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
-      <div class="kpi-card accent"><div class="kpi-label">Total 7 días</div><div class="kpi-value" style="font-size:20px">${eur(wS)}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Media diaria</div><div class="kpi-value" style="font-size:20px">${eur(Math.round(wS/7))}</div></div>
-      <div class="kpi-card green"><div class="kpi-label">Mejor día</div><div class="kpi-value" style="font-size:20px;color:var(--green)">${dayN(best.ds).slice(0,3)}</div><div class="kpi-sub">${eur(best.tS)}</div></div>
-      <div class="kpi-card amber"><div class="kpi-label">Presupuesto personal</div><div class="kpi-value" style="font-size:20px;color:var(--amber)">${eur(Math.round(wC))}</div></div>
+  const t=today();
+  const now=new Date(t);
+  const curY=now.getFullYear(), curM=now.getMonth()+1;
+
+  // Vista semana actual
+  const weekDays=[];
+  for(let i=0;i<7;i++){
+    const d=new Date(now); d.setDate(d.getDate()-now.getDay()+1+i); // lun-dom
+    const ds=d.toISOString().slice(0,10);
+    const real=salesOn(ds);
+    const prev=estSales(ds);
+    weekDays.push({ds,real,prev,label:['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'][i]});
+  }
+  const wPrev=weekDays.reduce((a,d)=>a+d.prev,0);
+  const wReal=weekDays.filter(d=>d.real>0).reduce((a,d)=>a+d.real,0);
+
+  // Vista mensual — todos los meses 2026
+  const months=[];
+  for(let m=1;m<=12;m++){
+    const mStr=`${curY}-${String(m).padStart(2,'0')}`;
+    const days=new Date(curY,m,0).getDate();
+    let totalPrev=0,totalReal=0,diasReal=0;
+    for(let d=1;d<=days;d++){
+      const ds=`${mStr}-${String(d).padStart(2,'0')}`;
+      const real=salesOn(ds);
+      const prev=estSales(ds);
+      if(real>0){totalReal+=real;diasReal++;}
+      totalPrev+=prev;
+    }
+    const pct2025=(() => {
+      // Comparar con mismo mes 2025
+      const mStr25=`${curY-1}-${String(m).padStart(2,'0')}`;
+      const v25=DB.salesHistory.filter(s=>s.date&&s.date.startsWith(mStr25)).reduce((a,s)=>a+(s.amount||0),0);
+      return v25>0?Math.round((totalPrev/v25-1)*100):null;
+    })();
+    const esFuturo=mStr>t.slice(0,7);
+    const esCurrent=mStr===t.slice(0,7);
+    months.push({m,mStr,label:new Date(curY,m-1,1).toLocaleString('es-ES',{month:'long'}),totalPrev,totalReal,diasReal,pct2025,esFuturo,esCurrent,dias:days});
+  }
+
+  // Factores tendencia
+  const factors=typeof TREND_FACTORS!=='undefined'?TREND_FACTORS:null;
+  const dowNames={0:'Dom',1:'Lun',2:'Mar',3:'Mié',4:'Jue',5:'Vie',6:'Sáb'};
+
+  const monthRows=months.map(mo=>{
+    const badge=mo.pct2025!==null
+      ?`<span class="badge badge-${mo.pct2025>=0?'green':'red'}">${mo.pct2025>=0?'+':''}${mo.pct2025}% vs 2025</span>`:'';
+    const barW=Math.min(100,mo.totalPrev/100000*100);
+    const barColor=mo.esCurrent?'var(--accent)':mo.esFuturo?'var(--teal)':'var(--text3)';
+    const estado=mo.esCurrent?'Mes actual':mo.esFuturo?'Previsión':mo.diasReal===mo.dias?'Completo':`${mo.diasReal}/${mo.dias} días`;
+    return`<tr style="${mo.esCurrent?'background:var(--bg3)':''}">
+      <td style="font-weight:${mo.esCurrent?'700':'400'}">${mo.label}</td>
+      <td class="td-mono" style="color:${mo.esFuturo?'var(--teal)':'var(--text)'}">
+        ${mo.esFuturo||mo.esCurrent?`~${eur(mo.totalPrev)}`:eur(mo.totalReal||mo.totalPrev)}
+      </td>
+      <td class="td-mono" style="color:var(--text3)">${eur(Math.round((mo.totalReal||mo.totalPrev)/mo.dias))}/día</td>
+      <td style="min-width:100px">
+        <div style="background:var(--bg3);border-radius:3px;height:5px">
+          <div style="width:${barW}%;background:${barColor};height:5px;border-radius:3px"></div>
+        </div>
+      </td>
+      <td>${badge}</td>
+      <td style="font-size:11px;color:var(--text3)">${estado}</td>
+    </tr>`;
+  }).join('');
+
+  const weekBars=weekDays.map(d=>{
+    const max=Math.max(...weekDays.map(x=>x.prev));
+    const h=Math.round(d.prev/max*60);
+    const hasReal=d.real>0;
+    return`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+      <div style="font-family:var(--mono);font-size:10px;color:${hasReal?'var(--green)':'var(--teal)'}">${eur(hasReal?d.real:d.prev)}</div>
+      <div style="width:100%;background:var(--bg3);border-radius:4px;height:60px;display:flex;align-items:flex-end;overflow:hidden">
+        <div style="width:100%;height:${h}px;background:${hasReal?'var(--green)':'rgba(79,124,255,0.5)'};border-radius:4px 4px 0 0;transition:height .3s"></div>
+      </div>
+      <div style="font-size:11px;font-weight:600;color:${d.ds===t?'var(--accent)':'var(--text2)'}">${d.label}</div>
+      <div style="font-size:9px;color:var(--text3)">${d.ds.slice(5)}</div>
+    </div>`;
+  }).join('');
+
+  return`<div class="page-header">
+    <div><h2><i class="fa fa-chart-mixed"></i> Previsión de ventas</h2>
+    <p>Basada en histórico real 2025-2026 · Factor tendencia: ${factors?`${((factors.global-1)*100).toFixed(1)}% vs año anterior`:'calculando...'}</p></div>
+  </div>
+  <div class="page-body" style="display:flex;flex-direction:column;gap:16px">
+
+    <!-- KPIs semana -->
+    <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
+      <div class="kpi-card"><div class="kpi-label">Previsión semana actual</div><div class="kpi-val">${eur(wPrev)}</div><div class="kpi-sub">~${eur(Math.round(wPrev/7))}/día</div></div>
+      <div class="kpi-card"><div class="kpi-label">Real acumulado semana</div><div class="kpi-val" style="color:var(--green)">${eur(wReal)}</div><div class="kpi-sub">${weekDays.filter(d=>d.real>0).length} días con datos</div></div>
+      <div class="kpi-card"><div class="kpi-label">Previsión mes actual</div><div class="kpi-val" style="color:var(--teal)">${eur(months.find(m=>m.esCurrent)?.totalPrev||0)}</div><div class="kpi-sub">${months.find(m=>m.esCurrent)?.label}</div></div>
     </div>
-    <div class="grid-2 section-gap" style="margin-top:16px">
-      ${plans.map(p=>`<div class="card"><div class="card-header"><div><span style="font-weight:600">${dayN(p.ds)}</span> <span style="color:var(--text3);font-size:12px">${p.ds}</span></div><div style="display:flex;gap:6px"><span class="badge badge-${p.lp<=30?'green':p.lp<=36?'amber':'red'}">${p.lp}% labor</span>${p.gf!==1?`<span class="badge badge-${p.gf>1?'green':'amber'}">${p.gf>1?'▲':'▼'}${Math.abs(Math.round((p.gf-1)*100))}%</span>`:''}</div></div>
-        <div style="display:flex;gap:16px;margin-bottom:10px"><div><div style="font-size:10px;color:var(--text3)">Ventas</div><div style="font-size:16px;font-weight:600;font-family:var(--mono);color:var(--green)">${eur(p.tS)}</div></div><div><div style="font-size:10px;color:var(--text3)">Personal</div><div style="font-size:16px;font-weight:600;font-family:var(--mono);color:var(--amber)">${eur(Math.round(p.tC))}</div></div><div><div style="font-size:10px;color:var(--text3)">H·pers.</div><div style="font-size:16px;font-weight:600;font-family:var(--mono)">${p.tH}</div></div></div>
-        <div style="display:flex;gap:2px;margin-bottom:10px">${p.plan.map(h=>{const a=Math.min(1,h.s/700);return`<div title="${h.h}:00 — ${eur(h.s)} — ${h.st}p" style="flex:1;height:26px;border-radius:3px;background:rgba(79,124,255,${0.08+a*.65});display:flex;align-items:center;justify-content:center;font-size:9px;color:rgba(255,255,255,.6)">${h.h}</div>`;}).join('')}</div>
-        ${p.shifts.map(s=>`<div style="display:flex;align-items:center;gap:8px;background:var(--bg3);border-radius:5px;padding:5px 8px;margin-bottom:3px"><span style="font-family:var(--mono);font-size:11px;color:var(--accent)">${s.ss}–${s.es}</span><div style="flex:1;height:3px;border-radius:2px;background:rgba(79,124,255,${s.st*.12})"></div><span style="font-size:12px;font-weight:500">${s.st} persona${s.st>1?'s':''}</span></div>`).join('')}
-      </div>`).join('')}
+
+    <!-- Semana en barras -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Semana actual — día a día</span>
+        <div style="display:flex;gap:10px;font-size:11px;color:var(--text3)">
+          <span><span style="display:inline-block;width:10px;height:10px;background:var(--green);border-radius:2px"></span> Real</span>
+          <span><span style="display:inline-block;width:10px;height:10px;background:rgba(79,124,255,0.5);border-radius:2px"></span> Previsto</span>
+        </div>
+      </div>
+      <div style="padding:16px;display:flex;gap:8px">${weekBars}</div>
     </div>
-    <div class="card section-gap"><div class="card-header"><span class="card-title">Ventas vs coste personal</span></div><div class="chart-wrap" style="height:200px"><canvas id="c_fc"></canvas></div></div>
+
+    <!-- Tabla mensual -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Previsión mensual ${curY}</span>
+        <span style="font-size:11px;color:var(--text3)">Verde = datos reales · Turquesa = previsión</span>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Mes</th><th>Total previsto</th><th>Media/día</th><th>Volumen</th><th>vs 2025</th><th>Estado</th></tr></thead>
+        <tbody>${monthRows}</tbody>
+        <tfoot><tr style="font-weight:700;background:var(--bg3)">
+          <td>TOTAL ANUAL</td>
+          <td class="td-mono">~${eur(months.reduce((a,m)=>a+(m.totalReal||m.totalPrev),0))}</td>
+          <td colspan="4"></td>
+        </tr></tfoot>
+      </table></div>
+    </div>
+
+    <!-- Metodología -->
+    <div class="card">
+      <div class="card-header"><span class="card-title"><i class="fa fa-circle-info"></i> Cómo se calcula la previsión</span></div>
+      <div style="padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+        <div style="font-size:12px;color:var(--text2)">
+          <div style="font-weight:600;margin-bottom:4px;color:var(--text)">📊 Modelo</div>
+          Ventas mismo día año anterior × factor de tendencia por día de semana
+        </div>
+        <div style="font-size:12px;color:var(--text2)">
+          <div style="font-weight:600;margin-bottom:4px;color:var(--text)">📅 Base de datos</div>
+          386 días reales (mayo 2025 → mayo 2026) + previsiones calculadas para junio-dic 2026
+        </div>
+        <div style="font-size:12px;color:var(--text2)">
+          <div style="font-weight:600;margin-bottom:4px;color:var(--text)">📉 Tendencia actual</div>
+          ${factors?Object.entries(factors.byDow).map(([d,f])=>`${dowNames[d]}: ${((f-1)*100).toFixed(0)}%`).join(' · '):'Calculando...'}
+        </div>
+        <div style="font-size:12px;color:var(--text2)">
+          <div style="font-weight:600;margin-bottom:4px;color:var(--text)">⚠️ Limitaciones</div>
+          No incluye festivos locales de Ceuta ni eventos puntuales. Importa datos mensuales para mejorar la precisión.
+        </div>
+      </div>
+    </div>
+
   </div>`;
 }
+
 function afForecast(){
-  const el=$('c_fc');if(!el)return;
-  const t=today(),labels=[],sv=[],cv=[];
-  for(let i=0;i<7;i++){const d=new Date(t);d.setDate(d.getDate()+i);const p=buildForecast(d.toISOString().split('T')[0]);labels.push(dayN(p.ds).slice(0,3));sv.push(p.tS);cv.push(Math.round(p.tC));}
-  new Chart(el,{type:'bar',data:{labels,datasets:[{label:'Ventas previstas',data:sv,backgroundColor:'rgba(79,124,255,0.5)',borderRadius:4},{label:'Coste personal',data:cv,backgroundColor:'rgba(245,158,11,0.5)',borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,labels:{color:'#8b90a8',font:{size:11},boxWidth:10}}},scales:{x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#565c7a'}},y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#565c7a',callback:v=>'€'+v}}}}});
+  // No necesita canvas — las barras son SVG inline
+}
+
+function checkForecastAlarm(){
+  const t=today();
+  const now=new Date(t);
+  const nextM=new Date(now.getFullYear(), now.getMonth()+1, 1);
+  const mStr=`${nextM.getFullYear()}-${String(nextM.getMonth()+1).padStart(2,'0')}`;
+  const key=`forecast_${mStr}`;
+  if(DB.alerts.some(a=>a._sk===key&&!a.done))return;
+
+  // Calcular previsión mes siguiente
+  const days=new Date(nextM.getFullYear(),nextM.getMonth()+1,0).getDate();
+  let totalPrev=0;
+  for(let d=1;d<=days;d++){
+    const ds=`${mStr}-${String(d).padStart(2,'0')}`;
+    totalPrev+=estSales(ds);
+  }
+
+  // Comparar con mes anterior
+  const prevM=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const prevTotal=DB.salesHistory.filter(s=>s.date&&s.date.startsWith(prevM)).reduce((a,s)=>a+(s.amount||0),0);
+  const pct=prevTotal>0?Math.round((totalPrev/prevTotal-1)*100):null;
+
+  const mLabel=nextM.toLocaleString('es-ES',{month:'long',year:'numeric'});
+  let msg=`📈 Previsión ${mLabel}: ~${eur(totalPrev)}`;
+  if(pct!==null) msg+=` (${pct>=0?'+':''}${pct}% vs mes anterior)`;
+
+  const soluciones=pct!==null&&pct<-15?[
+    `Las ventas previstas caen un ${Math.abs(pct)}% — revisar el cuadrante para ajustar personal a la baja`,
+    `Considerar adelantar vacaciones de empleados en este período`,
+    `Ver análisis detallado en Plantilla óptima`,
+  ]:pct!==null&&pct>15?[
+    `Las ventas previstas suben un ${pct}% — verificar que la plantilla es suficiente`,
+    `Revisar si hay suficientes empleados disponibles (sin vacaciones) para los turnos fuertes`,
+  ]:[`Previsión estable — revisar cuadrante en Plantilla óptima`];
+
+  DB.alerts.push({
+    id:maxId(DB.alerts),
+    sev: pct!==null&&Math.abs(pct)>15?'warning':'info',
+    msg, soluciones, mStr, done:false, _sk:key,
+    ts:now.toLocaleDateString('es-ES')
+  });
+  save(); updateBadge();
 }
 
 // ─── JIBBLE ─────────────────────────────────────────────────
