@@ -568,6 +568,7 @@ textarea.form-control { resize: vertical; min-height: 80px; }
         <div class="user-name" id="userName">Gerente</div>
         <div class="user-role" id="userRole">Gerente</div>
       </div>
+      <button onclick="recalcularTodo()" class="btn-logout" title="Recalcular previsiones y alertas" style="color:var(--teal)"><i class="fa fa-rotate"></i></button>
       <button onclick="doLogout()" class="btn-logout" title="Cerrar sesión"><i class="fa fa-right-from-bracket"></i></button>
     </div>
   </aside>
@@ -1435,8 +1436,80 @@ function save() {
      'obj','legal','conv','jibbleData','_log','salesHistory',
      'stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog'].forEach(k=>{p[k]=DB[k];});
     p._t = new Date().toISOString();
+    p._seedVersion = DB._seedVersion;
     _store.setItem('biconcepto_v3', JSON.stringify(p));
   } catch(e) {}
+}
+
+function recalcularTodo(){
+  // 1. Limpiar alertas automáticas (se regeneran a continuación)
+  DB.alerts = DB.alerts.filter(a=>a.done || (!a._sk));
+
+  // 2. Recalcular factores de tendencia desde salesHistory actual
+  recalcTrendFactors();
+
+  // 3. Regenerar alertas
+  checkStockAlarm();
+  checkStaffingAlarm();
+  checkForecastAlarm();
+
+  // 4. Guardar
+  save();
+  updateBadge();
+  flash('✓ Todo recalculado');
+  go(Object.keys(PAGES)[0]==='dashboard'?'dashboard':'dashboard');
+}
+
+function recalcTrendFactors(){
+  // Recalcular TREND_FACTORS dinámicamente desde salesHistory
+  // Para cada día de semana: media 2026 / media mismo dow 2025
+  const avg = {2025:{}, 2026:{}};
+  DB.salesHistory.forEach(s=>{
+    if(!s.date||s.date.length<10)return;
+    const y = s.date.slice(0,4);
+    if(y!=='2025'&&y!=='2026')return;
+    const dow = new Date(s.date).getDay(); // app: 0=Dom
+    if(!avg[y][dow]) avg[y][dow]=[];
+    avg[y][dow].push(s.amount||0);
+  });
+
+  const byDow = {};
+  let total=0, count=0;
+  for(let d=0;d<7;d++){
+    const v25 = avg['2025'][d]&&avg['2025'][d].length ?
+      avg['2025'][d].reduce((a,b)=>a+b,0)/avg['2025'][d].length : 0;
+    const v26 = avg['2026'][d]&&avg['2026'][d].length ?
+      avg['2026'][d].reduce((a,b)=>a+b,0)/avg['2026'][d].length : 0;
+    if(v25>0&&v26>0){
+      const f = Math.round(v26/v25*10000)/10000;
+      byDow[String(d)] = f;
+      total+=f; count++;
+    }
+  }
+  const global = count>0 ? Math.round(total/count*10000)/10000 : 0.80;
+
+  // Actualizar en TREND_FACTORS (variable global)
+  if(typeof TREND_FACTORS !== 'undefined'){
+    Object.assign(TREND_FACTORS, {byDow, global, updatedAt: today()});
+  }
+
+  // También regenerar previsiones futuras en FORECAST_SEED
+  if(typeof FORECAST_SEED !== 'undefined'){
+    const t = today();
+    FORECAST_SEED.forEach(f=>{
+      if(f.date <= t) return; // no recalcular días pasados
+      const dow = new Date(f.date).getDay();
+      const factor = byDow[String(dow)] || global;
+
+      // Buscar mismo dow año anterior
+      const dObj = new Date(f.date);
+      const ly = new Date(dObj); ly.setFullYear(ly.getFullYear()-1);
+      const lyDiff = dow - ly.getDay(); ly.setDate(ly.getDate()+lyDiff);
+      const lyDs = ly.toISOString().slice(0,10);
+      const lyV = DB.salesHistory.find(s=>s.date===lyDs);
+      if(lyV&&lyV.amount>0) f.amount = Math.round(lyV.amount*factor*100)/100;
+    });
+  }
 }
 
 function flash(msg) {
@@ -3384,6 +3457,7 @@ function impSales13(inp){
       save();
       logImp('Export-13',added+updated,true);
       audit('import_ventas',`Export-13: ${added} días nuevos, ${updated} actualizados`);
+      recalcTrendFactors(); // recalcular factores con los nuevos datos
       showR('rS13',true,
         `✓ ${added} días importados${updated?`, ${updated} actualizados`:''}`,
         `<a href="#" onclick="go('sales')" style="color:var(--accent)">Ver ventas →</a>`
