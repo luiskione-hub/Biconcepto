@@ -1332,14 +1332,18 @@ const _store = {
                     'stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog'];
       keys.forEach(k => { if (p[k] !== undefined) DB[k] = p[k]; });
     }
-    // Seed salesHistory con datos históricos si está vacío o muy escaso
-    // Los datos del Export importado por el usuario tienen prioridad (_src != 'hist')
-    const userImported = DB.salesHistory.filter(s=>s._src!=='hist').length;
-    if(userImported === 0 && DB.salesHistory.length < SALES_HISTORY_SEED.length){
-      // Fusionar: mantener datos del usuario, añadir seed donde no hay dato
+    // Fusionar SALES_HISTORY_SEED: añadir días que falten en el histórico guardado
+    // Los datos reales del usuario (mismo date) tienen prioridad sobre el seed
+    if(typeof SALES_HISTORY_SEED !== 'undefined' && SALES_HISTORY_SEED.length > 0){
       const existing = new Set(DB.salesHistory.map(s=>s.date));
-      SALES_HISTORY_SEED.forEach(s=>{ if(!existing.has(s.date)) DB.salesHistory.push({...s, id: DB.salesHistory.length+1}); });
-      DB.salesHistory.sort((a,b)=>a.date.localeCompare(b.date));
+      let added = 0;
+      SALES_HISTORY_SEED.forEach(s=>{
+        if(!existing.has(s.date)){
+          DB.salesHistory.push({...s, id: DB.salesHistory.length+1});
+          added++;
+        }
+      });
+      if(added > 0) DB.salesHistory.sort((a,b)=>a.date.localeCompare(b.date));
     }
   } catch(e) { console.warn('Load error:', e); }
 })();
@@ -2298,13 +2302,11 @@ function planFactor(ds){
 function availableEmps(ds){
   const dow=new Date(ds).getDay();
   const dsNorm=ds.slice(0,10);
-  // Solo excluir vacaciones aprobadas o sin estado (añadidas manualmente)
-  // Las 'pending' se ignoran hasta que el admin las apruebe
-  // Las 'rejected' siempre se ignoran
+  // Excluir vacaciones EXCEPTO las rechazadas
+  // pending, approved, sin status = todas bloquean al planificador
+  // solo rejected no bloquea
   const vacas=new Set(DB.vacations.filter(v=>{
-    if(v.status==='rejected')return false;      // rechazadas: no bloquean
-    if(v.status==='pending')return false;        // pendientes: no bloquean aún
-    // status==='approved' o sin status (manual desde calendario): bloquean
+    if(v.status==='rejected') return false; // rechazadas: no bloquean
     const vStart=(v.start||'').slice(0,10);
     const vEnd=(v.end||'').slice(0,10);
     return vStart<=dsNorm && vEnd>=dsNorm;
