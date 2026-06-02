@@ -1332,18 +1332,31 @@ const _store = {
                     'stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog'];
       keys.forEach(k => { if (p[k] !== undefined) DB[k] = p[k]; });
     }
-    // Fusionar SALES_HISTORY_SEED: añadir días que falten en el histórico guardado
-    // Los datos reales del usuario (mismo date) tienen prioridad sobre el seed
+    // ── Actualizar salesHistory con seed corregido ────────────
+    // Sobreescribe los importes del seed aunque la fecha ya exista
+    // (corrige datos importados con cálculo incorrecto en versiones anteriores)
     if(typeof SALES_HISTORY_SEED !== 'undefined' && SALES_HISTORY_SEED.length > 0){
-      const existing = new Set(DB.salesHistory.map(s=>s.date));
-      let added = 0;
-      SALES_HISTORY_SEED.forEach(s=>{
-        if(!existing.has(s.date)){
-          DB.salesHistory.push({...s, id: DB.salesHistory.length+1});
-          added++;
-        }
-      });
-      if(added > 0) DB.salesHistory.sort((a,b)=>a.date.localeCompare(b.date));
+      const seedVersion = 'v4'; // incrementar para forzar actualización
+      const savedVersion = p && p._seedVersion;
+      if(savedVersion !== seedVersion){
+        // Actualizar importes del seed (pueden haber cambiado con el recálculo)
+        const byDate = {};
+        DB.salesHistory.forEach(s=>{ byDate[s.date]=s; });
+        SALES_HISTORY_SEED.forEach(s=>{
+          if(byDate[s.date]){
+            // Actualizar si vino del seed anterior (no sobreescribir imports manuales del usuario)
+            if(byDate[s.date]._src==='hist'||!byDate[s.date]._src){
+              byDate[s.date].amount = s.amount;
+              byDate[s.date]._src = 'hist';
+            }
+          } else {
+            DB.salesHistory.push({...s, id: DB.salesHistory.length+1});
+          }
+        });
+        DB.salesHistory.sort((a,b)=>a.date.localeCompare(b.date));
+        DB._seedVersion = seedVersion;
+        try{ _store.setItem('biconcepto_v3', JSON.stringify(DB)); }catch(e){}
+      }
     }
   } catch(e) { console.warn('Load error:', e); }
 })();
