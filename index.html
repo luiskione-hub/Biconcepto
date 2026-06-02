@@ -2348,7 +2348,18 @@ function autoplanMonth(y, m){
   const SH=cfg.shifts;
   const mStr=`${y}-${String(m).padStart(2,'0')}`;
   const days=new Date(y,m,0).getDate();
-  let added=0, warnings=[];
+  let added=0, removed=0, warnings=[];
+
+  // Paso 1: eliminar turnos AUTO de empleados que tienen vacaciones ese día
+  // (para que el regenerado los reemplace correctamente)
+  DB.shifts = DB.shifts.filter(s=>{
+    if(!s.date.startsWith(mStr)) return true;           // otro mes: no tocar
+    if(s.status!=='auto'&&s.status!=='template') return true; // manual: no tocar
+    const disp = availableEmps(s.date);
+    const empDisp = disp.some(e=>e.id===s.employee_id);
+    if(!empDisp){ removed++; return false; }            // vacaciones/baja: eliminar
+    return true;
+  });
 
   for(let d=1;d<=days;d++){
     const ds=`${mStr}-${String(d).padStart(2,'0')}`;
@@ -2356,7 +2367,15 @@ function autoplanMonth(y, m){
     const rule=RULES[dow];
     const factor=planFactor(ds);
     const existing=DB.shifts.filter(s=>s.date===ds);
-    if(existing.length>0)continue;
+
+    // Solo saltar si hay suficientes turnos auto Y ninguno tiene vacaciones
+    const autoShifts=existing.filter(s=>s.status==='auto'||s.status==='template');
+    const manualShifts=existing.filter(s=>s.status!=='auto'&&s.status!=='template');
+    const nTarget=rule.p*2 + Math.max(0,rule.c-rule.p) + Math.max(0,rule.n-rule.p);
+    // Si ya tiene suficientes turnos (contando manuales), saltar
+    if(existing.length >= nTarget && autoShifts.length > 0) continue;
+    // Si solo hay turnos manuales (sin auto), también saltar
+    if(existing.length > 0 && autoShifts.length === 0) continue;
 
     // ─── Empleados disponibles ese día ───────────────────────
     // availableEmps ya filtra: activos, sin baja, sin vacaciones,
@@ -2505,9 +2524,9 @@ function autoplanMonth(y, m){
   }
 
   save();
-  audit('autoplan',`Planificación automática ${y}-${String(m).padStart(2,'0')}: ${added} turnos`);
+  audit('autoplan',`Planificación automática ${y}-${String(m).padStart(2,'0')}: ${added} turnos añadidos${removed>0?`, ${removed} eliminados por vacaciones`:''}`);
   const warnTxt=warnings.length>0?`\n⚠ ${warnings.length} días con cobertura incompleta`:'';
-  flash(`✓ ${added} turnos generados${warnTxt}`);
+  flash(`✓ ${added} turnos generados${removed>0?`, ${removed} actualizados por vacaciones`:''}${warnTxt}`);
   if(warnings.length>0)console.warn('Cobertura incompleta:',warnings);
   go('schedule');
 }
@@ -3530,19 +3549,29 @@ function pgForecast(){
     for(let d=1;d<=days;d++){
       const ds=`${mStr}-${String(d).padStart(2,'0')}`;
       const real=salesOn(ds);
-      const prev=estSales(ds);
+      const prev=real>0?real:estSales(ds);
       if(real>0){totalReal+=real;diasReal++;}
       totalPrev+=prev;
     }
-    const pct2025=(() => {
-      // Comparar con mismo mes 2025
+    const pct2025=(()=>{
       const mStr25=`${curY-1}-${String(m).padStart(2,'0')}`;
       const v25=DB.salesHistory.filter(s=>s.date&&s.date.startsWith(mStr25)).reduce((a,s)=>a+(s.amount||0),0);
       return v25>0?Math.round((totalPrev/v25-1)*100):null;
     })();
+    // Desviación previsión vs real (para meses con datos reales)
+    const prevSoloFuturo=diasReal<days?(()=>{
+      let p=0;
+      for(let d=1;d<=days;d++){
+        const ds=`${mStr}-${String(d).padStart(2,'0')}`;
+        p+=estSales(ds);
+      }
+      return p;
+    })():totalPrev;
+    const pctDevReal=totalReal>0&&prevSoloFuturo>0?Math.round((totalReal/prevSoloFuturo-1)*100):null;
     const esFuturo=mStr>t.slice(0,7);
     const esCurrent=mStr===t.slice(0,7);
-    months.push({m,mStr,label:new Date(curY,m-1,1).toLocaleString('es-ES',{month:'long'}),totalPrev,totalReal,diasReal,pct2025,esFuturo,esCurrent,dias:days});
+    months.push({m,mStr,label:new Date(curY,m-1,1).toLocaleString('es-ES',{month:'long'}),
+      totalPrev:prevSoloFuturo,totalReal,diasReal,pct2025,pctDevReal,esFuturo,esCurrent,dias:days});
   }
 
   // Factores tendencia
@@ -3555,18 +3584,25 @@ function pgForecast(){
     const barW=Math.min(100,mo.totalPrev/100000*100);
     const barColor=mo.esCurrent?'var(--accent)':mo.esFuturo?'var(--teal)':'var(--text3)';
     const estado=mo.esCurrent?'Mes actual':mo.esFuturo?'Previsión':mo.diasReal===mo.dias?'Completo':`${mo.diasReal}/${mo.dias} días`;
+    // Desviación real vs previsto
+    const devBadge=mo.pctDevReal!==null&&!mo.esFuturo
+      ?`<span class="badge badge-${Math.abs(mo.pctDevReal)<=5?'green':mo.pctDevReal>0?'green':'red'}" title="Real vs previsión">Real ${mo.pctDevReal>=0?'+':''}${mo.pctDevReal}%</span>`:'';
     return`<tr style="${mo.esCurrent?'background:var(--bg3)':''}">
       <td style="font-weight:${mo.esCurrent?'700':'400'}">${mo.label}</td>
-      <td class="td-mono" style="color:${mo.esFuturo?'var(--teal)':'var(--text)'}">
-        ${mo.esFuturo||mo.esCurrent?`~${eur(mo.totalPrev)}`:eur(mo.totalReal||mo.totalPrev)}
+      <td class="td-mono" style="color:var(--teal)">
+        ${mo.esFuturo||!mo.totalReal?`~${eur(mo.totalPrev)}`:eur(mo.totalPrev)}
       </td>
-      <td class="td-mono" style="color:var(--text3)">${eur(Math.round((mo.totalReal||mo.totalPrev)/mo.dias))}/día</td>
-      <td style="min-width:100px">
+      <td class="td-mono" style="color:${mo.totalReal>0?'var(--green)':'var(--text3)'}">
+        ${mo.totalReal>0?eur(mo.totalReal):mo.esFuturo?'—':'Sin datos'}
+      </td>
+      <td class="td-mono" style="font-size:11px;color:var(--text3)">${mo.totalReal>0?eur(Math.round(mo.totalReal/mo.diasReal))+'/d':mo.esFuturo?eur(Math.round(mo.totalPrev/mo.dias))+'/d':'—'}</td>
+      <td style="min-width:80px">
         <div style="background:var(--bg3);border-radius:3px;height:5px">
           <div style="width:${barW}%;background:${barColor};height:5px;border-radius:3px"></div>
+          ${mo.totalReal>0&&!mo.esFuturo?`<div style="width:${Math.min(100,mo.totalReal/100000*100)}%;background:var(--green);height:5px;border-radius:3px;margin-top:2px"></div>`:''}
         </div>
       </td>
-      <td>${badge}</td>
+      <td>${badge} ${devBadge}</td>
       <td style="font-size:11px;color:var(--text3)">${estado}</td>
     </tr>`;
   }).join('');
@@ -3617,7 +3653,7 @@ function pgForecast(){
         <span style="font-size:11px;color:var(--text3)">Verde = datos reales · Turquesa = previsión</span>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Mes</th><th>Total previsto</th><th>Media/día</th><th>Volumen</th><th>vs 2025</th><th>Estado</th></tr></thead>
+        <thead><tr><th>Mes</th><th style="color:var(--teal)">Previsión</th><th style="color:var(--green)">Real</th><th>Media/día</th><th>Volumen</th><th>Comparativa</th><th>Estado</th></tr></thead>
         <tbody>${monthRows}</tbody>
         <tfoot><tr style="font-weight:700;background:var(--bg3)">
           <td>TOTAL ANUAL</td>
