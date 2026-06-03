@@ -1247,6 +1247,8 @@ const FORECAST_SEED = [
 
 const TREND_FACTORS = {"byDow": {"0": 0.7707, "1": 0.679, "2": 0.6467, "3": 0.8227, "4": 0.8646, "5": 0.8012, "6": 0.8903}, "global": 0.7822, "updatedAt": "2026-05", "basedOnDays": 148};
 
+const STAFF_NEEDS_SEED = {"10": {"1": 1, "2": 1, "3": 1, "4": 1, "5": 1, "6": 1, "0": 1}, "11": {"1": 2, "2": 2, "3": 2, "4": 2, "5": 2, "6": 2, "0": 2}, "12": {"1": 4, "2": 3, "3": 3, "4": 3, "5": 3, "6": 4, "0": 3}, "13": {"1": 4, "2": 4, "3": 4, "4": 4, "5": 5, "6": 6, "0": 5}, "14": {"1": 4, "2": 4, "3": 5, "4": 4, "5": 5, "6": 6, "0": 6}, "15": {"1": 4, "2": 4, "3": 5, "4": 4, "5": 6, "6": 6, "0": 6}, "16": {"1": 2, "2": 2, "3": 3, "4": 4, "5": 4, "6": 6, "0": 6}, "17": {"1": 2, "2": 2, "3": 3, "4": 3, "5": 3, "6": 4, "0": 4}, "18": {"1": 2, "2": 2, "3": 3, "4": 3, "5": 3, "6": 3, "0": 3}, "19": {"1": 4, "2": 4, "3": 8, "4": 4, "5": 4, "6": 3, "0": 4}, "20": {"1": 4, "2": 4, "3": 8, "4": 5, "5": 5, "6": 6, "0": 7}, "21": {"1": 4, "2": 4, "3": 8, "4": 6, "5": 7, "6": 7, "0": 8}, "22": {"1": 4, "2": 4, "3": 8, "4": 6, "5": 7, "6": 7, "0": 8}, "23": {"1": 4, "2": 4, "3": 7, "4": 5, "5": 5, "6": 6, "0": 6}, "0": {"1": 0, "2": 0, "3": 0, "4": 4, "5": 5, "6": 5, "0": 4}};
+
 const JMAP = {
   'Aya El Kabaj':'Aya El Kabaj','Brahim Motjar':'Brahim Motjar','Dafne De La Pena':'Dafne De La Pena',
   'Dikra Abdelnevi':'Dikra Abdelnevi','Fátima Embark':'Fátima Embark','Hanan Abdelnevi':'Hanan Abdelnevi',
@@ -1293,6 +1295,7 @@ const DB = {
   fixedCosts:Object.entries(FIXED_COSTS).map((e,i)=>({id:i+1,name:e[0],amount:e[1],active:true})),
   obj:{laborPct:30,minSales:1200,sph:45},
   shifts:[],vacations:[],salesHistory:[],bankMovements:[],jibbleData:[],_log:[],auditLog:[],stockItems:[],stockOrders:[],stockSnapshots:[],
+  staffNeeds:{}, // necesidades de personal por hora y día (importado desde Excel)
   planConfig:{
     rules:{1:{c:4,n:4,p:2},2:{c:4,n:4,p:2},3:{c:5,n:8,p:5},4:{c:5,n:8,p:5},5:{c:4,n:6,p:4},6:{c:5,n:9,p:5},0:{c:6,n:7,p:6}},
     shifts:{comida:{start:'10:00',end:'18:30'},cena:{start:'19:00',end:'01:30'},partido1:{start:'12:00',end:'16:00'},partido2:{start:'20:00',end:'00:30'}},
@@ -1330,7 +1333,7 @@ const _store = {
       const p = JSON.parse(raw);
       const keys = ['employees','shifts','vacations','alerts','bankMovements',
                     'fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory',
-                    'stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog'];
+                    'stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog','staffNeeds'];
       keys.forEach(k => { if (p[k] !== undefined) DB[k] = p[k]; });
     }
     // ── Actualizar salesHistory con seed corregido ────────────
@@ -1434,7 +1437,7 @@ function save() {
     const p = {};
     ['employees','shifts','vacations','alerts','bankMovements','fixedCosts',
      'obj','legal','conv','jibbleData','_log','salesHistory',
-     'stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog'].forEach(k=>{p[k]=DB[k];});
+     'stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog','staffNeeds'].forEach(k=>{p[k]=DB[k];});
     p._t = new Date().toISOString();
     p._seedVersion = DB._seedVersion;
     _store.setItem('biconcepto_v3', JSON.stringify(p));
@@ -2335,7 +2338,29 @@ function delVacDay(vacId, ds){
   save(); flash('✓ Vacaciones eliminadas'); calClick(ds); go('schedule');
 }
 
-// Acceso a config — usa DB.planConfig si existe, si no valores por defecto
+// Necesidades de personal por hora: {hora: {dow: nPersonas}}
+// Se carga desde STAFF_NEEDS_SEED (Excel importado) o desde DB.staffNeeds
+function getStaffNeeds(){
+  if(DB.staffNeeds && Object.keys(DB.staffNeeds).length > 0) return DB.staffNeeds;
+  if(typeof STAFF_NEEDS_SEED !== 'undefined') return STAFF_NEEDS_SEED;
+  return {};
+}
+
+// Número de personas necesarias en un turno (start→end) para un día
+// Toma el máximo de personas necesarias en cualquier hora del turno
+function staffForShift(start, end, dow){
+  const needs = getStaffNeeds();
+  if(!Object.keys(needs).length) return 0;
+  const hStart = parseInt(start);
+  const hEnd = parseInt(end) || (parseInt(end)===0?24:parseInt(end));
+  let max = 0;
+  for(let h = hStart; h < (hEnd>hStart?hEnd:hEnd+24); h++){
+    const hk = String(h % 24);
+    const n = needs[hk] ? (needs[hk][String(dow)]||0) : 0;
+    if(n > max) max = n;
+  }
+  return max;
+}
 function getPlanConfig(){
   if(!DB.planConfig)DB.planConfig={
     rules:{1:{c:4,n:4,p:2},2:{c:4,n:4,p:2},3:{c:5,n:8,p:5},4:{c:5,n:8,p:5},5:{c:4,n:6,p:4},6:{c:5,n:9,p:5},0:{c:6,n:7,p:6}},
@@ -2464,9 +2489,23 @@ function autoplanMonth(y, m){
     const noEnc=disponibles.filter(e=>!ENCARGADOS.includes(e.id));
 
     // ─── Números de personas necesarias ──────────────────────
-    const nP=Math.max(0, rule.p+factor);
-    const nC=Math.max(0, rule.c-rule.p);      // solo comida (sin contar partidos)
-    const nN=Math.max(0, rule.n-rule.p+factor); // solo cena
+    // Si hay datos de necesidades por hora, usarlos; si no, usar reglas de Config. turnos
+    const hasNeeds = Object.keys(getStaffNeeds()).length > 0;
+    let nP, nC, nN;
+    if(hasNeeds){
+      // Calcular personas necesarias por franja usando el máximo de necesidades horarias
+      const nComidaNeeds = staffForShift(SH.comida.start, SH.comida.end, dow);
+      const nCenaNeeds   = staffForShift(SH.cena.start,   SH.cena.end,   dow);
+      const nPartNeeds   = staffForShift(SH.partido1.start, SH.partido2.end, dow);
+      // Partidos cubren comida y cena: minimizar personal
+      nP = Math.max(0, Math.min(nComidaNeeds, nCenaNeeds) + factor);
+      nC = Math.max(0, nComidaNeeds - nP);
+      nN = Math.max(0, nCenaNeeds   - nP + factor);
+    } else {
+      nP = Math.max(0, rule.p+factor);
+      nC = Math.max(0, rule.c-rule.p);
+      nN = Math.max(0, rule.n-rule.p+factor);
+    }
 
     const asignados=new Set();
 
@@ -4284,8 +4323,6 @@ function pgUsers(){
       </div>
     </div>
 
-    </div>
-
     <!-- Log de auditoría -->
     <div class="card">
       <div class="card-header">
@@ -4445,10 +4482,49 @@ const RULE_TYPES = [
   {id:'rest_min',   label:'Descanso mínimo entre turnos', desc:'Mínimo de horas entre el fin de un turno y el inicio del siguiente', icon:'fa-clock', color:'var(--teal)'},
 ];
 
+function renderStaffNeedsTable(){
+  const needs=getStaffNeeds();
+  if(!Object.keys(needs).length) return '<div style="padding:20px;text-align:center;color:var(--text3);font-size:13px"><i class="fa fa-file-excel" style="font-size:24px;margin-bottom:8px;display:block;color:var(--teal)"></i>Sube el Excel de necesidades (formato: filas=horas, columnas=días de semana)</div>';
+  const dows=[{d:1,l:'Lun'},{d:2,l:'Mar'},{d:3,l:'Mié'},{d:4,l:'Jue'},{d:5,l:'Vie'},{d:6,l:'Sáb'},{d:0,l:'Dom'}];
+  const hours=Object.keys(needs).map(Number).sort((a,b)=>a-b);
+  const maxVal=Math.max(...hours.flatMap(h=>dows.map(d=>needs[String(h)][String(d.d)]||0)));
+  function heatColor(v){
+    if(v===0)return 'var(--bg3)';
+    const p=v/maxVal;
+    if(p<0.3)return 'rgba(79,124,255,0.2)';
+    if(p<0.6)return 'rgba(79,124,255,0.45)';
+    if(p<0.8)return 'rgba(245,158,11,0.5)';
+    return 'rgba(239,68,68,0.5)';
+  }
+  const rows=hours.map(h=>{
+    const cells=dows.map(d=>{
+      const v=needs[String(h)]&&needs[String(h)][String(d.d)]!=null?needs[String(h)][String(d.d)]:0;
+      return '<td style="text-align:center;padding:5px;background:'+heatColor(v)+';font-family:var(--mono);font-size:12px;font-weight:'+(v>0?'600':'400')+';color:'+(v>0?'var(--text)':'var(--text3)')+'">'+( v||'—')+'</td>';
+    }).join('');
+    const nextH=(h+1)%24;
+    return '<tr><td style="font-family:var(--mono);font-size:11px;color:var(--text3);padding:5px 8px;white-space:nowrap">'+String(h).padStart(2,'0')+':00–'+String(nextH).padStart(2,'0')+':00</td>'+cells+'</tr>';
+  }).join('');
+  const totals=dows.map(d=>{
+    const t=hours.reduce((a,h)=>a+(needs[String(h)]&&needs[String(h)][String(d.d)]?needs[String(h)][String(d.d)]:0),0);
+    return '<td style="text-align:center;font-weight:700;font-family:var(--mono);font-size:12px;padding:5px;background:var(--bg3)">'+t+'</td>';
+  }).join('');
+  return '<div class="table-wrap"><table><thead><tr><th style="padding:5px 8px">Franja</th>'+dows.map(d=>'<th style="text-align:center;padding:5px">'+d.l+'</th>').join('')+'</tr></thead><tbody>'+rows+'</tbody><tfoot><tr><td style="padding:5px 8px;font-weight:700;font-size:11px">Total p/hora</td>'+totals+'</tr></tfoot></table></div>';
+}
+
 function pgAssignRules(){
   const cfg=getPlanConfig();
   const rules=cfg.assignRules||[];
-  const empOpts=DB.employees.filter(e=>e.active).map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+  const now=new Date();
+  const selM=_store.getItem('needs_m')||(now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0'));
+  const analysis=analyzeStaffingNeeds(selM);
+
+  // Month selector options
+  const monthOpts=[];
+  for(let i=-1;i<=6;i++){
+    const d=new Date(now.getFullYear(),now.getMonth()+i,1);
+    const v=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+    monthOpts.push(`<option value="${v}"${v===selM?' selected':''}>${d.toLocaleString('es-ES',{month:'long',year:'numeric'})}</option>`);
+  }
 
   const ruleCards=rules.length?rules.map((r,i)=>{
     const type=RULE_TYPES.find(t=>t.id===r.type)||RULE_TYPES[0];
@@ -4472,29 +4548,54 @@ function pgAssignRules(){
         <button class="btn btn-danger btn-sm btn-icon" onclick="deleteAssignRule(${i})"><i class="fa fa-trash"></i></button>
       </div>
     </div>`;
-  }).join(''):`<div style="padding:20px;text-align:center;color:var(--text3);font-size:13px">
-    Sin reglas configuradas. Pulsa "+ Nueva regla" para añadir.
-  </div>`;
+  }).join(''):`<div style="padding:20px;text-align:center;color:var(--text3);font-size:13px">Sin reglas configuradas.</div>`;
 
   return`<div class="page-header">
     <div><h2><i class="fa fa-shield-halved"></i> Reglas de asignación</h2>
-    <p>Condiciones que el autoplanificador respeta al generar el cuadrante</p></div>
+    <p>Condiciones para el autoplanificador · Análisis de plantilla</p></div>
     <div class="page-actions">
+      <select style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px"
+        onchange="_store.setItem('needs_m',this.value);go('assignRules')">${monthOpts.join('')}</select>
       <button class="btn btn-primary btn-sm" onclick="newAssignRuleMdl()"><i class="fa fa-plus"></i> Nueva regla</button>
     </div>
   </div>
   <div class="page-body" style="display:flex;flex-direction:column;gap:16px">
 
+    <!-- Análisis de plantilla vs necesidades -->
+    ${analysis ? renderStaffingAnalysis(analysis) : ''}
+
+    <!-- Necesidades de personal por hora -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title"><i class="fa fa-table"></i> Necesidades de personal por hora</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:11px;color:var(--text3)">${Object.keys(getStaffNeeds()).length>0?'Datos cargados':'Sin datos'}</span>
+          <label class="btn btn-secondary btn-sm" style="cursor:pointer">
+            <i class="fa fa-file-excel"></i> Importar Excel
+            <input type="file" accept=".xlsx,.xls" style="display:none" onchange="impStaffNeeds(this)">
+          </label>
+          ${Object.keys(getStaffNeeds()).length>0?`<button class="btn btn-danger btn-sm btn-icon" onclick="clearStaffNeeds()" title="Borrar tabla"><i class="fa fa-trash"></i></button>`:''}
+        </div>
+      </div>
+      ${renderStaffNeedsTable()}
+      <div style="padding:8px 16px;font-size:11px;color:var(--text3);border-top:1px solid var(--border)">
+        <i class="fa fa-circle-info"></i> El autoplanificador usa estos datos para calcular cuántas personas asignar en cada turno.
+        <span style="background:rgba(79,124,255,0.2);padding:1px 6px;border-radius:3px">bajo</span>
+        <span style="background:rgba(245,158,11,0.5);padding:1px 6px;border-radius:3px;margin-left:4px">medio</span>
+        <span style="background:rgba(239,68,68,0.5);padding:1px 6px;border-radius:3px;margin-left:4px">alto</span>
+      </div>
+    </div>
+
     <!-- Reglas activas -->
     <div class="card">
       <div class="card-header">
         <span class="card-title"><i class="fa fa-list-check"></i> Reglas configuradas</span>
-        <span style="font-size:11px;color:var(--text3)">${rules.filter(r=>r.active!==false).length} activas · ${rules.length} total</span>
+        <span style="font-size:11px;color:var(--text3)">${rules.filter(r=>r.active!==false).length} activas</span>
       </div>
       <div style="padding:12px 16px">${ruleCards}</div>
     </div>
 
-    <!-- Referencia de tipos -->
+    <!-- Tipos disponibles -->
     <div class="card">
       <div class="card-header"><span class="card-title"><i class="fa fa-circle-info"></i> Tipos de regla disponibles</span></div>
       <div style="padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">
@@ -4504,52 +4605,333 @@ function pgAssignRules(){
         </div>`).join('')}
       </div>
     </div>
-
   </div>`;
+}
+
+function renderStaffingAnalysis(a){
+  const icon = a.esOptimo?'fa-circle-check':a.esDeficit?'fa-triangle-exclamation':'fa-circle-info';
+  const pctBar = Math.min(100, Math.round(a.hrsDisp/a.hrsNecMes*100));
+
+  const propCards = a.propuestas.map(p=>`
+    <div style="border:1px solid var(--border2);border-radius:8px;overflow:hidden;margin-bottom:8px">
+      <div style="padding:8px 12px;background:var(--bg3);display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border2)">
+        <i class="fa ${p.icon}" style="color:${p.color}"></i>
+        <span style="font-weight:600;font-size:13px">${p.titulo}</span>
+      </div>
+      <div style="padding:8px 12px">
+        ${p.opciones.map((o,i)=>`<div style="display:flex;gap:8px;font-size:12px;color:var(--text2);padding:3px 0">
+          <span style="color:var(--text3);min-width:14px">${i+1}.</span><span>${o}</span>
+        </div>`).join('')}
+      </div>
+    </div>`).join('');
+
+  return`<div class="card" style="border-top:3px solid ${a.color}">
+    <div class="card-header">
+      <span class="card-title"><i class="fa ${icon}" style="color:${a.color}"></i> Análisis de plantilla — ${a.mLabel}</span>
+      <span style="font-weight:700;color:${a.color};font-size:13px;text-transform:capitalize">${a.estado}</span>
+    </div>
+    <div style="padding:14px 16px">
+      <!-- KPIs -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px">
+        <div style="background:var(--bg3);border-radius:8px;padding:10px 12px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px">Horas necesarias/mes</div>
+          <div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--text)">${a.hrsNecMes}h</div>
+          <div style="font-size:10px;color:var(--text3)">${a.hrsNecSemana}h/semana</div>
+        </div>
+        <div style="background:var(--bg3);border-radius:8px;padding:10px 12px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px">Horas disponibles</div>
+          <div style="font-size:20px;font-weight:700;font-family:var(--mono);color:${a.color}">${a.hrsDisp}h</div>
+          <div style="font-size:10px;color:var(--text3)">${a.nActivos} empleados (${a.nConVac} de vaca)</div>
+        </div>
+        <div style="background:var(--bg3);border-radius:8px;padding:10px 12px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px">${a.esDeficit?'Déficit':'Exceso'}</div>
+          <div style="font-size:20px;font-weight:700;font-family:var(--mono);color:${a.color}">${Math.abs(a.deficit)}h</div>
+          <div style="font-size:10px;color:var(--text3)">${a.pct}% ${a.esDeficit?'por debajo':'por encima'}</div>
+        </div>
+        <div style="background:var(--bg3);border-radius:8px;padding:10px 12px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px">Coste laboral est.</div>
+          <div style="font-size:18px;font-weight:700;font-family:var(--mono);color:var(--text)">${eur(a.costeActual)}</div>
+          <div style="font-size:10px;color:var(--text3)">Necesario: ${eur(a.costeNecesario)}</div>
+        </div>
+      </div>
+      <!-- Barra de cobertura -->
+      <div style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-bottom:4px">
+          <span>Cobertura de horas</span><span style="color:${a.color};font-weight:600">${pctBar}%</span>
+        </div>
+        <div style="background:var(--bg3);border-radius:6px;height:8px;position:relative">
+          <div style="width:${Math.min(100,pctBar)}%;background:${a.color};height:8px;border-radius:6px;transition:width .5s"></div>
+          <div style="position:absolute;left:92%;top:-4px;width:2px;height:16px;background:var(--green);border-radius:1px" title="Óptimo (100%)"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-top:3px">
+          <span>0%</span><span style="color:var(--green)">Óptimo</span><span>Exceso</span>
+        </div>
+      </div>
+      <!-- Propuestas -->
+      ${a.propuestas.length?`<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);margin-bottom:8px">Propuestas de acción</div>${propCards}`:'<div style="color:var(--green);font-size:13px"><i class="fa fa-circle-check"></i> Plantilla equilibrada para este mes. No se requieren ajustes.</div>'}
+    </div>
+  </div>`;
+}
+
+function analyzeStaffingNeeds(targetMonth){
+  const needs = getStaffNeeds();
+  if(!Object.keys(needs).length) return null;
+
+  const now = new Date();
+  const y = targetMonth ? parseInt(targetMonth.split('-')[0]) : now.getFullYear();
+  const m = targetMonth ? parseInt(targetMonth.split('-')[1]) : now.getMonth()+1;
+  const mStr = `${y}-${String(m).padStart(2,'0')}`;
+  const daysInMonth = new Date(y,m,0).getDate();
+  const COSTE_HR = 12; // €/h bruto + SS estimado
+
+  // 1. Horas necesarias por semana según tabla (suma de todas las celdas = horas-persona/semana)
+  const dowNames = {0:'Dom',1:'Lun',2:'Mar',3:'Mié',4:'Jue',5:'Vie',6:'Sáb'};
+  let hrsNecSemana = 0;
+  Object.entries(needs).forEach(([h, dows])=>{
+    Object.values(dows).forEach(v=>{ hrsNecSemana += (v||0); });
+  });
+  const hrsNecMes = Math.round(hrsNecSemana * 4.33);
+
+  // 2. Horas disponibles con plantilla actual ese mes
+  // Descontar: bajas médicas, vacaciones aprobadas en ese mes
+  const vacEmpIds = new Set(DB.vacations.filter(v=>{
+    if(v.status==='rejected') return false;
+    return v.start.slice(0,7)===mStr || v.end.slice(0,7)===mStr ||
+           (v.start<mStr+'-01' && v.end>mStr+'-31');
+  }).map(v=>v.employee_id));
+
+  const activos = DB.employees.filter(e=>e.active&&e.sick===0);
+  const activosSinVac = activos.filter(e=>!vacEmpIds.has(e.id));
+  const activosConVac = activos.filter(e=>vacEmpIds.has(e.id));
+
+  // Calcular horas reales descontando días de vacaciones
+  let hrsDisp = 0;
+  activos.forEach(e=>{
+    let hrsBase = e.wh * 4.33;
+    if(vacEmpIds.has(e.id)){
+      // Calcular días de vaca ese mes
+      const vacs = DB.vacations.filter(v=>v.employee_id===e.id&&v.status!=='rejected'&&
+        (v.start.slice(0,7)===mStr||v.end.slice(0,7)===mStr||(v.start<mStr+'-01'&&v.end>mStr+'-31')));
+      let vacDias = 0;
+      vacs.forEach(v=>{
+        let cur = new Date(Math.max(new Date(v.start), new Date(`${mStr}-01`)));
+        const end = new Date(Math.min(new Date(v.end), new Date(y,m,0)));
+        while(cur<=end){ vacDias++; cur.setDate(cur.getDate()+1); }
+      });
+      hrsBase = Math.max(0, hrsBase - (e.wh/5)*vacDias);
+    }
+    hrsDisp += hrsBase;
+  });
+  hrsDisp = Math.round(hrsDisp);
+
+  const deficit = hrsNecMes - hrsDisp;
+  const pct = hrsNecMes>0 ? Math.round(Math.abs(deficit)/hrsNecMes*100) : 0;
+  const esDeficit = deficit > 0;
+  const esOptimo = pct <= 8; // ±8% = óptimo
+
+  // 3. Estado
+  let estado, color;
+  if(esOptimo){ estado='óptimo'; color='var(--green)'; }
+  else if(esDeficit){ estado='infradimensionado'; color='var(--red)'; }
+  else { estado='sobredimensionado'; color='var(--amber)'; }
+
+  // 4. Propuestas concretas
+  const propuestas = [];
+  const hrsGap = Math.abs(deficit);
+  const costeGap = Math.round(hrsGap * COSTE_HR);
+
+  if(esDeficit){
+    // Calcular contratos que cubren el gap
+    const opciones = [
+      {h:40, label:'jornada completa (40h)'},
+      {h:35, label:'jornada reducida (35h)'},
+      {h:30, label:'jornada reducida (30h)'},
+      {h:20, label:'media jornada (20h)'},
+    ];
+    // Combinaciones para cubrir el gap
+    const hMes = h => h*4.33;
+    propuestas.push({
+      tipo:'contratar',
+      icon:'fa-user-plus',
+      color:'var(--red)',
+      titulo:'Contratar personal',
+      opciones: opciones.map(o=>{
+        const n = Math.ceil(hrsGap/hMes(o.h));
+        const resto = hrsGap - (n-1)*hMes(o.h);
+        const coste = Math.round(n*o.h*4.33*COSTE_HR);
+        return `${n} persona${n>1?'s':''} a ${o.label} (~${coste}€/mes)`;
+      })
+    });
+    // Horas extra
+    const hrsExtraPerPerson = Math.round(hrsGap / activosSinVac.length);
+    if(hrsExtraPerPerson <= 20){
+      propuestas.push({
+        tipo:'extras',
+        icon:'fa-clock',
+        color:'var(--amber)',
+        titulo:'Horas extra temporales',
+        opciones:[
+          `Distribuir ${Math.round(hrsGap)}h extra entre los ${activosSinVac.length} empleados disponibles (~${hrsExtraPerPerson}h/persona)`,
+          `Coste adicional estimado: ${eur(costeGap)} (sin recargos de horas extra)`,
+          `Ideal para picos temporales de temporada sin contratación permanente`
+        ]
+      });
+    }
+    // Retrasar vacaciones
+    if(activosConVac.length > 0){
+      propuestas.push({
+        tipo:'vacaciones',
+        icon:'fa-calendar-xmark',
+        color:'var(--teal)',
+        titulo:'Revisar vacaciones del mes',
+        opciones:[
+          `${activosConVac.length} empleado${activosConVac.length>1?'s están':'está'} de vacaciones en ${new Date(y,m-1,1).toLocaleString('es-ES',{month:'long'})}`,
+          `Retrasar o fraccionar sus vacaciones recuperaría horas disponibles`,
+          `Revisar en la sección Vacaciones si alguna puede moverse`
+        ]
+      });
+    }
+  } else if(!esOptimo){
+    // Sobredimensionado
+    const hSobra = Math.abs(deficit);
+    const personasExtra = Math.round(hSobra / (20*4.33));
+    propuestas.push({
+      tipo:'vacaciones',
+      icon:'fa-umbrella-beach',
+      color:'var(--teal)',
+      titulo:'Adelantar vacaciones',
+      opciones:[
+        `Sobran ~${Math.round(hSobra)}h (${pct}%) — es buen momento para dar vacaciones`,
+        `${personasExtra} persona${personasExtra>1?'s':''} de 20h podrían estar de vacaciones sin afectar la operativa`,
+        `Revisar qué empleados tienen días pendientes en Vacaciones`
+      ]
+    });
+    propuestas.push({
+      tipo:'reducir',
+      icon:'fa-arrow-down',
+      color:'var(--amber)',
+      titulo:'Reducir jornadas',
+      opciones:[
+        `Negociar reducción temporal de jornada con empleados de 40h`,
+        `Plantear ERTE parcial si el sobredimensionamiento es estructural (>${pct}% más de ${3} meses)`,
+        personasExtra>0?`A largo plazo: no renovar ${personasExtra} contrato${personasExtra>1?'s':''} de 20h al vencer`:''
+      ].filter(Boolean)
+    });
+    // No renovar si muy sobredimensionado
+    if(pct>20){
+      const personasNORenovar = Math.floor(hSobra/(40*4.33));
+      if(personasNORenovar>0){
+        propuestas.push({
+          tipo:'despido',
+          icon:'fa-user-minus',
+          color:'var(--red)',
+          titulo:'Ajuste estructural de plantilla',
+          opciones:[
+            `Con ${pct}% de sobredimensionamiento sostenido, valorar no renovar ${personasNORenovar} contrato${personasNORenovar>1?'s':''} de 40h`,
+            `Ahorro estimado: ~${eur(personasNORenovar*40*4.33*COSTE_HR)}/mes`,
+            `Consultar con asesoría laboral antes de tomar esta decisión`
+          ]
+        });
+      }
+    }
+  }
+
+  return {
+    mStr, mLabel: new Date(y,m-1,1).toLocaleString('es-ES',{month:'long',year:'numeric'}),
+    hrsNecSemana, hrsNecMes, hrsDisp, deficit, pct, estado, color,
+    esDeficit, esOptimo, propuestas,
+    nActivos: activos.length, nConVac: activosConVac.length, nSinVac: activosSinVac.length,
+    costeActual: Math.round(hrsDisp*COSTE_HR),
+    costeNecesario: Math.round(hrsNecMes*COSTE_HR)
+  };
+}
+function impStaffNeeds(inp){
+  const file=inp.files[0]; if(!file)return;
+  const r=new FileReader();
+  r.onload=e=>{
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+      let headerRow=-1, dowCols={};
+      const dowNames={'lunes':1,'martes':2,'miércoles':3,'miercoles':3,'jueves':4,'viernes':5,'sábado':6,'sabado':6,'domingo':0};
+      for(let i=0;i<Math.min(5,rows.length);i++){
+        const found=rows[i].filter(c=>dowNames[String(c).toLowerCase().trim()]);
+        if(found.length>=5){headerRow=i;break;}
+      }
+      if(headerRow<0){alert('No se encontraron los días de la semana');return;}
+      rows[headerRow].forEach((c,i)=>{
+        const k=dowNames[String(c).toLowerCase().trim()];
+        if(k!==undefined) dowCols[i]=k;
+      });
+      const needs={};
+      for(let i=headerRow+1;i<rows.length;i++){
+        const row=rows[i];
+        const horaStr=String(row[0]||'').trim();
+        if(!horaStr||horaStr.toLowerCase().includes('total'))continue;
+        const hMatch=horaStr.match(/^(\d{1,2})/);
+        if(!hMatch)continue;
+        let h=parseInt(hMatch[1]);
+        if(h===24)h=0;
+        needs[String(h)]={};
+        Object.entries(dowCols).forEach(([col,dow])=>{
+          needs[String(h)][String(dow)]=parseInt(row[col])||0;
+        });
+      }
+      if(Object.keys(needs).length<5){alert('No se pudieron leer suficientes filas');return;}
+      DB.staffNeeds=needs;
+      save();
+      audit('staff_needs',`Necesidades personal importadas: ${Object.keys(needs).length} franjas horarias`);
+      checkStaffingAlarm();
+      flash('✓ Necesidades importadas: '+Object.keys(needs).length+' franjas');
+      go('assignRules');
+    }catch(err){
+      console.error(err);
+      alert('Error al leer el archivo: '+err.message);
+    }
+  };
+  r.readAsArrayBuffer(file);
+}
+
+function clearStaffNeeds(){
+  if(!confirm('¿Borrar las necesidades de personal cargadas?'))return;
+  DB.staffNeeds={};
+  save();
+  go('assignRules');
 }
 
 function newAssignRuleMdl(){
   const empOpts=DB.employees.filter(e=>e.active).map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
   const typeOpts=RULE_TYPES.map(t=>`<option value="${t.id}">${t.label}</option>`).join('');
   const dowOpts=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'].map((d,i)=>`<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="${i}" class="dow-check" checked style="accent-color:var(--accent)"> ${d}</label>`).join('');
-
   modal(`<div class="modal" style="max-width:460px">
     <div class="modal-header"><h3 class="modal-title"><i class="fa fa-shield-halved"></i> Nueva regla de asignación</h3></div>
     <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
-
       <div>
         <label style="font-size:12px;color:var(--text3)">Nombre de la regla (opcional)</label>
         <input type="text" id="rLabel" placeholder="Ej: Encargados separados" style="width:100%;margin-top:4px;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;box-sizing:border-box">
       </div>
-
       <div>
         <label style="font-size:12px;color:var(--text3)">Tipo de regla</label>
         <select id="rType" style="width:100%;margin-top:4px;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px" onchange="toggleRuleFields(this.value)">
           ${typeOpts}
         </select>
       </div>
-
       <div id="rEmpSection">
         <label style="font-size:12px;color:var(--text3)">Empleados afectados <span style="color:var(--text2)">(Cmd/Ctrl para varios)</span></label>
         <select multiple id="rEmps" style="width:100%;margin-top:4px;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;height:110px">
           ${empOpts}
         </select>
       </div>
-
       <div id="rHoursSection" style="display:none">
         <label style="font-size:12px;color:var(--text3)">Horas mínimas de descanso entre turnos</label>
         <input type="number" id="rHours" value="10" min="8" max="24" style="width:100%;margin-top:4px;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;box-sizing:border-box">
       </div>
-
       <div id="rDowSection" style="display:none">
         <label style="font-size:12px;color:var(--text3)">Días de la semana donde aplica</label>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">${dowOpts}</div>
       </div>
-
-      <div style="background:var(--bg3);border-radius:6px;padding:8px 10px;font-size:11px;color:var(--text3)" id="rDesc">
-        Selecciona un tipo para ver la descripción.
-      </div>
-
+      <div style="background:var(--bg3);border-radius:6px;padding:8px 10px;font-size:11px;color:var(--text3)" id="rDesc">Selecciona un tipo para ver la descripción.</div>
     </div>
     <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
@@ -5272,14 +5654,14 @@ function pgReports(){
 // ═══════════════════════════════════════════════════════════
 function exportBackup(){
   try{
-    const p={};['employees','shifts','vacations','alerts','bankMovements','fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory','stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog'].forEach(k=>{p[k]=DB[k];});
+    const p={};['employees','shifts','vacations','alerts','bankMovements','fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory','stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog','staffNeeds'].forEach(k=>{p[k]=DB[k];});
     p._v='biconcepto_v3';p._t=new Date().toISOString();
     const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(p,null,2)],{type:'application/json'}));a.download='backup_biconcepto_'+today()+'.json';a.click();
   }catch(e){alert('Error: '+e.message);}
 }
 function importBackup(){
   const inp=document.createElement('input');inp.type='file';inp.accept='.json';
-  inp.onchange=e=>{const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p._v){alert('Archivo no válido');return;}['employees','shifts','vacations','alerts','bankMovements','fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory','stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog'].forEach(k=>{if(p[k]!==undefined)DB[k]=p[k];});save();location.reload();}catch(err){alert('Error: '+err.message);}};r.readAsText(e.target.files[0]);};inp.click();
+  inp.onchange=e=>{const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p._v){alert('Archivo no válido');return;}['employees','shifts','vacations','alerts','bankMovements','fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory','stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog','staffNeeds'].forEach(k=>{if(p[k]!==undefined)DB[k]=p[k];});save();location.reload();}catch(err){alert('Error: '+err.message);}};r.readAsText(e.target.files[0]);};inp.click();
 }
 function clearStorage(){if(!confirm('¿Borrar TODOS los datos?\n\nNo se puede deshacer.'))return;_store.removeItem('biconcepto_v3');location.reload();}
 
