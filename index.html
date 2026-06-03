@@ -2448,14 +2448,29 @@ function autoplanMonth(y, m){
   const days=new Date(y,m,0).getDate();
   let added=0, removed=0, warnings=[];
 
-  // Paso 1: eliminar turnos AUTO de empleados que tienen vacaciones ese día
-  // (para que el regenerado los reemplace correctamente)
-  DB.shifts = DB.shifts.filter(s=>{
-    if(!s.date.startsWith(mStr)) return true;           // otro mes: no tocar
-    if(s.status!=='auto'&&s.status!=='template') return true; // manual: no tocar
-    const disp = availableEmps(s.date);
-    const empDisp = disp.some(e=>e.id===s.employee_id);
-    if(!empDisp){ removed++; return false; }            // vacaciones/baja: eliminar
+  // CONVENIO HOSTELERÍA CEUTA Art.9-10:
+  // - Descanso mínimo 12h entre jornadas
+  // - Descanso mínimo 1.5 días/semana → aplicado como máx 5 días/semana para jornada completa
+  // - Parciales: sus días fijos en fs[] ya limitan los días disponibles
+
+  function getWeekKey(ds){
+    const d=new Date(ds);
+    const firstDay=new Date(y,m-1,1);
+    return Math.floor((d.getDate()-1+firstDay.getDay())/7);
+  }
+
+  function diasTrabajadosSemana(empId, weekKey){
+    return new Set(
+      DB.shifts.filter(s=>s.date.startsWith(mStr)&&s.employee_id===empId&&getWeekKey(s.date)===weekKey)
+        .map(s=>s.date)
+    ).size;
+  }
+
+  // Paso 1: eliminar turnos AUTO de empleados en vacaciones
+  DB.shifts=DB.shifts.filter(s=>{
+    if(!s.date.startsWith(mStr))return true;
+    if(s.status!=='auto'&&s.status!=='template')return true;
+    if(!availableEmps(s.date).some(e=>e.id===s.employee_id)){removed++;return false;}
     return true;
   });
 
@@ -2465,184 +2480,104 @@ function autoplanMonth(y, m){
     const rule=RULES[dow];
     const factor=planFactor(ds);
     const existing=DB.shifts.filter(s=>s.date===ds);
-
-    // Solo saltar si hay suficientes turnos auto Y ninguno tiene vacaciones
     const autoShifts=existing.filter(s=>s.status==='auto'||s.status==='template');
-    const manualShifts=existing.filter(s=>s.status!=='auto'&&s.status!=='template');
-    const nTarget=rule.p*2 + Math.max(0,rule.c-rule.p) + Math.max(0,rule.n-rule.p);
-    // Si ya tiene suficientes turnos (contando manuales), saltar
-    if(existing.length >= nTarget && autoShifts.length > 0) continue;
-    // Si solo hay turnos manuales (sin auto), también saltar
-    if(existing.length > 0 && autoShifts.length === 0) continue;
+    const nTarget=rule.p*2+Math.max(0,rule.c-rule.p)+Math.max(0,rule.n-rule.p);
+    if(existing.length>=nTarget&&autoShifts.length>0)continue;
+    if(existing.length>0&&autoShifts.length===0)continue;
 
-    // ─── Empleados disponibles ese día ───────────────────────
-    // availableEmps ya filtra: activos, sin baja, sin vacaciones,
-    // y parciales solo en sus días fijos (fs[].d === dow)
-    const disponibles=availableEmps(ds);
+    const weekKey=getWeekKey(ds);
+    // Filtrar por descanso semanal convenio
+    const disponibles=availableEmps(ds).filter(e=>{
+      if(e.type==='part')return true; // parciales: ya controlado por fs[]
+      return diasTrabajadosSemana(e.id,weekKey)<5; // max 5 días/semana jornada completa
+    });
 
-    // Horas acumuladas en el mes
     const hrsMap={};
-    disponibles.forEach(e=>{ hrsMap[e.id]=hrsInMonth(e.id,mStr); });
-
-    // ─── Separar categorías ───────────────────────────────────
+    disponibles.forEach(e=>{hrsMap[e.id]=hrsInMonth(e.id,mStr);});
     const encDisp=disponibles.filter(e=>ENCARGADOS.includes(e.id));
-    const noEnc=disponibles.filter(e=>!ENCARGADOS.includes(e.id));
 
-    // ─── Números de personas necesarias ──────────────────────
-    // Si hay datos de necesidades por hora, usarlos; si no, usar reglas de Config. turnos
-    const hasNeeds = Object.keys(getStaffNeeds()).length > 0;
-    let nP, nC, nN;
+    const hasNeeds=Object.keys(getStaffNeeds()).length>0;
+    let nP,nC,nN;
     if(hasNeeds){
-      // Calcular personas necesarias por franja usando el máximo de necesidades horarias
-      const nComidaNeeds = staffForShift(SH.comida.start, SH.comida.end, dow);
-      const nCenaNeeds   = staffForShift(SH.cena.start,   SH.cena.end,   dow);
-      const nPartNeeds   = staffForShift(SH.partido1.start, SH.partido2.end, dow);
-      // Partidos cubren comida y cena: minimizar personal
-      nP = Math.max(0, Math.min(nComidaNeeds, nCenaNeeds) + factor);
-      nC = Math.max(0, nComidaNeeds - nP);
-      nN = Math.max(0, nCenaNeeds   - nP + factor);
-    } else {
-      nP = Math.max(0, rule.p+factor);
-      nC = Math.max(0, rule.c-rule.p);
-      nN = Math.max(0, rule.n-rule.p+factor);
+      const nCo=staffForShift(SH.comida.start,SH.comida.end,dow);
+      const nCe=staffForShift(SH.cena.start,SH.cena.end,dow);
+      nP=Math.max(0,Math.min(nCo,nCe)+factor);
+      nC=Math.max(0,nCo-nP);
+      nN=Math.max(0,nCe-nP+factor);
+    }else{
+      nP=Math.max(0,rule.p+factor);
+      nC=Math.max(0,rule.c-rule.p);
+      nN=Math.max(0,rule.n-rule.p+factor);
     }
 
     const asignados=new Set();
 
-    // Elegir N personas de un pool, sin repetir, encargados separados por turno
-    function elegir(pool, n, turnoTipo){
-      // Aplicar reglas de asignación configuradas
-      const shKey = turnoTipo==='partido'?'partido1':turnoTipo==='comida'?'comida':'cena';
-      const tStart = SH[shKey]?SH[shKey].start:'10:00';
-      const tEnd   = SH[shKey]?SH[shKey].end:'18:30';
-      const poolFiltrado = applyAssignRules(pool, ds, tStart, tEnd, asignados);
-
-      const encYaAsignado=ENCARGADOS.find(id=>asignados.has(id));
-      const candidatos=[...poolFiltrado].filter(e=>!asignados.has(e.id));
-
-      // Ordenar: menos horas primero
-      candidatos.sort((a,b)=>(hrsMap[a.id]||0)-(hrsMap[b.id]||0));
-
-      // Si el turno ya tiene un encargado asignado (en asignados),
-      // intentar que el otro encargado vaya al turno opuesto
-      // Para partido: asignar máx 1 encargado
-      if(turnoTipo==='partido'){
-        // Máx 1 encargado en partido
-        const encEnPool=candidatos.filter(e=>ENCARGADOS.includes(e.id));
-        const noEncEnPool=candidatos.filter(e=>!ENCARGADOS.includes(e.id));
-        const result=[];
-        if(encEnPool.length>0) result.push(encEnPool[0]); // solo 1 encargado en partido
-        // Completar con no encargados
-        for(const e of noEncEnPool){ if(result.length>=n)break; result.push(e); }
-        // Si falta, añadir más encargados (caso extremo)
-        for(const e of encEnPool.slice(1)){ if(result.length>=n)break; result.push(e); }
-        return result.slice(0,n);
+    function elegir(pool,n,tipo){
+      const shKey=tipo==='partido'?'partido1':tipo==='comida'?'comida':'cena';
+      const tS=SH[shKey]?SH[shKey].start:'10:00';
+      const tE=SH[shKey]?SH[shKey].end:'18:30';
+      const filt=applyAssignRules(pool,ds,tS,tE,asignados).filter(e=>!asignados.has(e.id));
+      filt.sort((a,b)=>(hrsMap[a.id]||0)-(hrsMap[b.id]||0));
+      if(tipo==='partido'){
+        const enc=filt.filter(e=>ENCARGADOS.includes(e.id));
+        const nenc=filt.filter(e=>!ENCARGADOS.includes(e.id));
+        const r=enc.length>0?[enc[0]]:[];
+        for(const e of nenc){if(r.length>=n)break;r.push(e);}
+        return r.slice(0,n);
       }
-
-      if(turnoTipo==='comida'||turnoTipo==='cena'){
-        // Regla: si ya hay un encargado asignado en este día,
-        // el segundo encargado NO puede ir al mismo tipo de turno
-        const encEnEsteTurno=candidatos.filter(e=>{
-          if(!ENCARGADOS.includes(e.id))return false;
-          // Verificar si el otro encargado ya está en un turno equivalente
-          const otroEnc=ENCARGADOS.find(id=>id!==e.id&&asignados.has(id));
-          return !otroEnc; // solo si el otro encargado NO está ya asignado
-        });
-
-        // Si ambos encargados están disponibles, poner uno en comida y otro en cena
-        // Para este turno, incluir max 1 encargado
-        const encParaEste=candidatos.filter(e=>ENCARGADOS.includes(e.id)).slice(0,1);
-        const noEncPara=candidatos.filter(e=>!ENCARGADOS.includes(e.id));
-
-        const result=[...encParaEste];
-        for(const e of noEncPara){ if(result.length>=n)break; result.push(e); }
-        return result.slice(0,n);
-      }
-
-      return candidatos.slice(0,n);
+      const enc=filt.filter(e=>ENCARGADOS.includes(e.id)).slice(0,1);
+      const nenc=filt.filter(e=>!ENCARGADOS.includes(e.id));
+      const r=[...enc];
+      for(const e of nenc){if(r.length>=n)break;r.push(e);}
+      return r.slice(0,n);
     }
 
-    // ─── 1. PARTIDOS ─────────────────────────────────────────
-    // Parciales con fs que coincida con horario de partido (12:00 start)
-    const parcialesPartido=disponibles.filter(e=>{
-      if(!e.fs||!e.fs.length)return false;
-      return e.fs.some(f=>f.d===dow&&f.s===SH.partido1.start);
-    });
-    // Parciales con fs de comida (10:00 start) — van a comida, no a partido
-    const parcialesComida=disponibles.filter(e=>{
-      if(!e.fs||!e.fs.length)return false;
-      return e.fs.some(f=>f.d===dow&&f.s===SH.comida.start);
-    });
-    // Parciales con fs de cena (19:00 start) — van a cena, no a partido
-    const parcialesCena=disponibles.filter(e=>{
-      if(!e.fs||!e.fs.length)return false;
-      return e.fs.some(f=>f.d===dow&&f.s===SH.cena.start);
-    });
-    // Completos y parciales sin fs fijo: pueden ir a cualquier turno
-    const flexibles=disponibles.filter(e=>!e.fs||!e.fs.length);
+    const pPart=disponibles.filter(e=>e.fs&&e.fs.some(f=>f.d===dow&&f.s===SH.partido1.start));
+    const pCom=disponibles.filter(e=>e.fs&&e.fs.some(f=>f.d===dow&&f.s===SH.comida.start));
+    const pCena=disponibles.filter(e=>e.fs&&e.fs.some(f=>f.d===dow&&f.s===SH.cena.start));
+    const flex=disponibles.filter(e=>!e.fs||!e.fs.length);
 
-    // Encargado de partido: el con menos horas
-    const encPartido=encDisp.sort((a,b)=>(hrsMap[a.id]||0)-(hrsMap[b.id]||0)).slice(0,1);
-    // Pool partido: parciales de partido + 1 encargado + flexibles (sin duplicar)
-    const idsEnPartidoPool=new Set([...parcialesPartido,...encPartido].map(e=>e.id));
-    const poolPartido=[...parcialesPartido,...encPartido,...flexibles.filter(e=>!idsEnPartidoPool.has(e.id))];
-    const empPartido=elegir(poolPartido, nP, 'partido');
-
-    empPartido.forEach(emp=>{
-      const s1=SH.partido1.start, e1=SH.partido1.end;
-      const s2=SH.partido2.start, e2=SH.partido2.end;
+    // 1. PARTIDOS
+    const encP=encDisp.sort((a,b)=>(hrsMap[a.id]||0)-(hrsMap[b.id]||0)).slice(0,1);
+    const idsP=new Set([...pPart,...encP].map(e=>e.id));
+    const empP=elegir([...pPart,...encP,...flex.filter(e=>!idsP.has(e.id))],nP,'partido');
+    empP.forEach(emp=>{
+      const s1=SH.partido1.start,e1=SH.partido1.end,s2=SH.partido2.start,e2=SH.partido2.end;
       DB.shifts.push({id:maxId(DB.shifts),employee_id:emp.id,date:ds,start:s1,end:e1,cost:parseFloat((hrsOf(s1,e1)*emp.hc).toFixed(2)),status:'auto',tipo:'partido-m'});
       DB.shifts.push({id:maxId(DB.shifts),employee_id:emp.id,date:ds,start:s2,end:e2,cost:parseFloat((hrsOf(s2,e2)*emp.hc).toFixed(2)),status:'auto',tipo:'partido-t'});
-      asignados.add(emp.id);
-      hrsMap[emp.id]=(hrsMap[emp.id]||0)+hrsOf(s1,e1)+hrsOf(s2,e2);
-      added+=2;
+      asignados.add(emp.id);hrsMap[emp.id]=(hrsMap[emp.id]||0)+hrsOf(s1,e1)+hrsOf(s2,e2);added+=2;
     });
-    if(empPartido.length<nP) warnings.push(`${ds} partido: ${empPartido.length}/${nP}`);
-    warnings.push(...checkCoverageRule(ds, SH.partido1.start, asignados));
+    if(empP.length<nP)warnings.push(`${ds} partido: ${empP.length}/${nP}`);
+    warnings.push(...checkCoverageRule(ds,SH.partido1.start,asignados));
 
-    // ─── 2. SOLO COMIDA ──────────────────────────────────────
-    // Parciales de comida fija + encargado que no fue a partido + flexibles libres
-    const encNoEnPartido=encDisp.filter(e=>!asignados.has(e.id));
-    const poolComida=[
-      ...parcialesComida.filter(e=>!asignados.has(e.id)),
-      ...encNoEnPartido,
-      ...flexibles.filter(e=>!asignados.has(e.id))
-    ];
-    const empComida=elegir(poolComida, nC, 'comida');
-
-    empComida.forEach(emp=>{
-      const s=SH.comida.start, e=SH.comida.end;
+    // 2. SOLO COMIDA
+    const encNoP=encDisp.filter(e=>!asignados.has(e.id));
+    const empC=elegir([...pCom.filter(e=>!asignados.has(e.id)),...encNoP,...flex.filter(e=>!asignados.has(e.id))],nC,'comida');
+    empC.forEach(emp=>{
+      const s=SH.comida.start,e=SH.comida.end;
       DB.shifts.push({id:maxId(DB.shifts),employee_id:emp.id,date:ds,start:s,end:e,cost:parseFloat((hrsOf(s,e)*emp.hc).toFixed(2)),status:'auto',tipo:'comida'});
-      asignados.add(emp.id); hrsMap[emp.id]=(hrsMap[emp.id]||0)+hrsOf(s,e); added++;
+      asignados.add(emp.id);hrsMap[emp.id]=(hrsMap[emp.id]||0)+hrsOf(s,e);added++;
     });
-    if(empComida.length<nC) warnings.push(`${ds} comida: ${empComida.length}/${nC}`);
+    if(empC.length<nC)warnings.push(`${ds} comida: ${empC.length}/${nC}`);
 
-    // ─── 3. SOLO CENA ─────────────────────────────────────────
-    // Parciales de cena fija + encargado que aún no está asignado + flexibles libres
-    const encParaCena=encDisp.filter(e=>!asignados.has(e.id));
-    const poolCena=[
-      ...parcialesCena.filter(e=>!asignados.has(e.id)),
-      ...encParaCena,
-      ...flexibles.filter(e=>!asignados.has(e.id))
-    ];
-    const empCena=elegir(poolCena, nN, 'cena');
-
-    empCena.forEach(emp=>{
-      const s=SH.cena.start, e=SH.cena.end;
+    // 3. SOLO CENA
+    const encNoC=encDisp.filter(e=>!asignados.has(e.id));
+    const empN=elegir([...pCena.filter(e=>!asignados.has(e.id)),...encNoC,...flex.filter(e=>!asignados.has(e.id))],nN,'cena');
+    empN.forEach(emp=>{
+      const s=SH.cena.start,e=SH.cena.end;
       DB.shifts.push({id:maxId(DB.shifts),employee_id:emp.id,date:ds,start:s,end:e,cost:parseFloat((hrsOf(s,e)*emp.hc).toFixed(2)),status:'auto',tipo:'cena'});
-      asignados.add(emp.id); hrsMap[emp.id]=(hrsMap[emp.id]||0)+hrsOf(s,e); added++;
+      asignados.add(emp.id);hrsMap[emp.id]=(hrsMap[emp.id]||0)+hrsOf(s,e);added++;
     });
-    if(empCena.length<nN) warnings.push(`${ds} cena: ${empCena.length}/${nN}`);
+    if(empN.length<nN)warnings.push(`${ds} cena: ${empN.length}/${nN}`);
   }
 
   save();
-  audit('autoplan',`Planificación automática ${y}-${String(m).padStart(2,'0')}: ${added} turnos añadidos${removed>0?`, ${removed} eliminados por vacaciones`:''}`);
-  const warnTxt=warnings.length>0?`\n⚠ ${warnings.length} días con cobertura incompleta`:'';
-  flash(`✓ ${added} turnos generados${removed>0?`, ${removed} actualizados por vacaciones`:''}${warnTxt}`);
-  if(warnings.length>0)console.warn('Cobertura incompleta:',warnings);
+  audit('autoplan',`Planificación automática ${y}-${String(m).padStart(2,'0')}: ${added} turnos`);
+  const wt=warnings.length>0?`\n⚠ ${warnings.length} días con cobertura incompleta`:'';
+    flash(`✓ ${added} turnos generados${wt}`);
+  if(warnings.length>0)console.warn('Cobertura:',warnings);
   go('schedule');
 }
-
 function vacResumenMdl(){
   const year=new Date().getFullYear();
   const rows=DB.employees.filter(e=>e.active).map(e=>{
