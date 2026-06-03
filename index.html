@@ -5325,7 +5325,7 @@ function pgOptimalStaff(){
   return`<div class="page-header">
     <div><h2><i class="fa fa-calculator"></i> Plantilla óptima</h2>
     <p>Calcula la estructura de personal ideal según ventas y presupuesto laboral</p></div>
-    <div class="page-actions" style="display:flex;gap:8px;align-items:center">
+    <div class="page-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <select style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px"
         onchange="_store.setItem('opt_m',this.value);go('optimalStaff')">
         ${months.map(m=>`<option value="${m.m}"${m.m===selM?' selected':''}>${m.label}</option>`).join('')}
@@ -5334,6 +5334,9 @@ function pgOptimalStaff(){
         onchange="_store.setItem('opt_y',this.value);go('optimalStaff')">
         ${[now.getFullYear()-1,now.getFullYear(),now.getFullYear()+1].map(y=>`<option value="${y}"${y===selY?' selected':''}>${y}</option>`).join('')}
       </select>
+      <button class="btn btn-accent btn-sm" onclick="genScheduleFromOptimal(${selY},${selM})">
+        <i class="fa fa-wand-magic-sparkles"></i> Generar cuadrante
+      </button>
     </div>
   </div>
   <div class="page-body" style="display:flex;flex-direction:column;gap:16px">
@@ -5383,9 +5386,99 @@ function pgOptimalStaff(){
       </table></div>
     </div>
 
+    <!-- Cómo se generará el cuadrante -->
+    <div class="card" style="border-left:3px solid var(--accent)">
+      <div class="card-header"><span class="card-title"><i class="fa fa-circle-info"></i> Cómo se genera el cuadrante</span></div>
+      <div style="padding:14px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;font-size:12px;color:var(--text2)">
+        <div><div style="font-weight:600;color:var(--text);margin-bottom:4px">👥 Plantilla actual</div>
+          ${DB.employees.filter(e=>e.active&&!e.sick).map(e=>`<div style="padding:2px 0">${e.name} · ${e.wh}h${e.type==='part'&&e.fs&&e.fs.length?` · días fijos`:''}</div>`).join('')}
+        </div>
+        <div><div style="font-weight:600;color:var(--text);margin-bottom:4px">📋 Reglas activas</div>
+          <div>5 días/semana máx. (convenio)</div>
+          <div>Vacaciones: ${DB.vacations.filter(v=>v.status!=='rejected'&&(v.start.slice(0,7)===selY+'-'+String(selM).padStart(2,'0')||v.end.slice(0,7)===selY+'-'+String(selM).padStart(2,'0'))).length} periodos aprobados</div>
+          ${(getPlanConfig().assignRules||[]).filter(r=>r.active!==false).map(r=>`<div>${r.label||r.type}</div>`).join('')}
+        </div>
+        <div><div style="font-weight:600;color:var(--text);margin-bottom:4px">⚙️ Config. turnos</div>
+          <div>Comida: ${getPlanConfig().shifts.comida.start}–${getPlanConfig().shifts.comida.end}</div>
+          <div>Cena: ${getPlanConfig().shifts.cena.start}–${getPlanConfig().shifts.cena.end}</div>
+          <div>Partido: ${getPlanConfig().shifts.partido1.start}–${getPlanConfig().shifts.partido1.end} y ${getPlanConfig().shifts.partido2.start}–${getPlanConfig().shifts.partido2.end}</div>
+        </div>
+      </div>
+    </div>
+
     ${res.fuente!=='real'?`<div class="alert-item warning" style="margin:0"><i class="fa fa-triangle-exclamation alert-icon"></i><div><div class="alert-msg">No hay ventas reales para ${new Date(selY,selM-1,1).toLocaleString('es-ES',{month:'long',year:'numeric'})}.</div><div class="alert-meta">Importa el Export-13 de ese mes o ajusta las ventas previstas en Objetivos para mejorar el cálculo.</div></div></div>`:''}
 
   </div>`;
+}
+function genScheduleFromOptimal(y, m){
+  const mStr=`${y}-${String(m).padStart(2,'0')}`;
+  const mLabel=new Date(y,m-1,1).toLocaleString('es-ES',{month:'long',year:'numeric'});
+  const existing=DB.shifts.filter(s=>s.date.startsWith(mStr)).length;
+  const vacMes=DB.vacations.filter(v=>v.status!=='rejected'&&
+    (v.start.slice(0,7)===mStr||v.end.slice(0,7)===mStr)).length;
+  const cfg=getPlanConfig();
+  const rules=cfg.assignRules||[];
+  const activeRules=rules.filter(r=>r.active!==false);
+
+  modal(`<div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <h3 class="modal-title"><i class="fa fa-wand-magic-sparkles"></i> Generar cuadrante — ${mLabel}</h3>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
+
+      <!-- Resumen de lo que se usará -->
+      <div style="background:var(--bg3);border-radius:8px;padding:12px;font-size:12px">
+        <div style="font-weight:600;margin-bottom:8px;color:var(--text)">El cuadrante se generará con:</div>
+        <div style="display:flex;flex-direction:column;gap:5px;color:var(--text2)">
+          <div style="display:flex;gap:8px">
+            <i class="fa fa-users" style="color:var(--accent);width:14px;margin-top:2px"></i>
+            <span><strong>${DB.employees.filter(e=>e.active&&!e.sick).length} empleados activos</strong>
+              (${DB.employees.filter(e=>e.active&&!e.sick&&e.type==='full').length} a 40h,
+               ${DB.employees.filter(e=>e.active&&!e.sick&&e.type==='part').length} parciales)
+            </span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <i class="fa fa-scale-balanced" style="color:var(--teal);width:14px;margin-top:2px"></i>
+            <span>Convenio hostelería Ceuta: máx 5 días/semana, 12h descanso entre jornadas</span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <i class="fa fa-umbrella-beach" style="color:var(--amber);width:14px;margin-top:2px"></i>
+            <span>${vacMes} periodo${vacMes!==1?'s':''} de vacaciones aprobados en ${mLabel}</span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <i class="fa fa-shield-halved" style="color:var(--purple);width:14px;margin-top:2px"></i>
+            <span>${activeRules.length} regla${activeRules.length!==1?'s':''} de asignación activa${activeRules.length!==1?'s':''}
+              ${activeRules.map(r=>`<span style="background:var(--bg2);padding:1px 6px;border-radius:3px;margin-left:4px;font-size:11px">${r.label||r.type}</span>`).join('')}
+            </span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <i class="fa fa-chart-mixed" style="color:var(--green);width:14px;margin-top:2px"></i>
+            <span>Ajuste por ventas históricas (±1 persona si difieren >25%)</span>
+          </div>
+          ${Object.keys(getStaffNeeds()).length>0?`<div style="display:flex;gap:8px">
+            <i class="fa fa-table" style="color:var(--accent);width:14px;margin-top:2px"></i>
+            <span>Tabla de necesidades por hora importada</span>
+          </div>`:''}
+        </div>
+      </div>
+
+      ${existing>0?`<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--amber)">
+        <i class="fa fa-triangle-exclamation"></i>
+        Ya hay <strong>${existing} turnos</strong> en ${mLabel}.
+        "Generar" solo añade donde falten. "Borrar y regenerar" elimina todos los automáticos y los rehace desde cero.
+      </div>`:''}
+
+    </div>
+    <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      ${existing>0?`<button class="btn btn-danger btn-sm" onclick="closeModal();DB.shifts=DB.shifts.filter(s=>!(s.date.startsWith('${mStr}')&&(s.status==='auto'||s.status==='template')));autoplanMonth(${y},${m})">
+        <i class="fa fa-rotate"></i> Borrar y regenerar
+      </button>`:''}
+      <button class="btn btn-primary" onclick="closeModal();_store.setItem('cal_y','${y}');_store.setItem('cal_m','${m}');autoplanMonth(${y},${m})">
+        <i class="fa fa-wand-magic-sparkles"></i> Generar cuadrante
+      </button>
+    </div>
+  </div>`);
 }
 // ─────────────────────────────────────────────────────────────
 
