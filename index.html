@@ -1295,7 +1295,8 @@ const DB = {
   fixedCosts:Object.entries(FIXED_COSTS).map((e,i)=>({id:i+1,name:e[0],amount:e[1],active:true})),
   obj:{laborPct:30,minSales:1200,sph:45},
   shifts:[],vacations:[],salesHistory:[],bankMovements:[],jibbleData:[],_log:[],auditLog:[],stockItems:[],stockOrders:[],stockSnapshots:[],
-  staffNeeds:{}, // necesidades de personal por hora y día (importado desde Excel)
+  staffNeeds:{}, // legacy — ahora se usa staffSeasons
+  staffSeasons:[], // [{id, name, from, to, needs:{hora:{dow:n}}}]
   planConfig:{
     rules:{1:{c:4,n:4,p:2},2:{c:4,n:4,p:2},3:{c:5,n:8,p:5},4:{c:5,n:8,p:5},5:{c:4,n:6,p:4},6:{c:5,n:9,p:5},0:{c:6,n:7,p:6}},
     shifts:{comida:{start:'10:00',end:'18:30'},cena:{start:'19:00',end:'01:30'},partido1:{start:'12:00',end:'16:00'},partido2:{start:'20:00',end:'00:30'}},
@@ -1333,7 +1334,7 @@ const _store = {
       const p = JSON.parse(raw);
       const keys = ['employees','shifts','vacations','alerts','bankMovements',
                     'fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory',
-                    'stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog','staffNeeds'];
+                    'stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog','staffNeeds','staffSeasons'];
       keys.forEach(k => { if (p[k] !== undefined) DB[k] = p[k]; });
     }
     // ── Actualizar salesHistory con seed corregido ────────────
@@ -1437,7 +1438,7 @@ function save() {
     const p = {};
     ['employees','shifts','vacations','alerts','bankMovements','fixedCosts',
      'obj','legal','conv','jibbleData','_log','salesHistory',
-     'stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog','staffNeeds'].forEach(k=>{p[k]=DB[k];});
+     'stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog','staffNeeds','staffSeasons'].forEach(k=>{p[k]=DB[k];});
     p._t = new Date().toISOString();
     p._seedVersion = DB._seedVersion;
     _store.setItem('biconcepto_v3', JSON.stringify(p));
@@ -2246,9 +2247,60 @@ function calNav(dir){
 
 function calClick(ds){
   const el=$('calDetail'); if(!el)return;
+  const dow=new Date(ds).getDay(); // 0=Dom...6=Sáb (app format)
   const ds2=DB.shifts.filter(s=>s.date===ds);
   const vacas=DB.vacations.filter(v=>v.start<=ds&&v.end>=ds);
-  const empOpts=DB.employees.filter(e=>e.active).map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+  const needs=getStaffNeeds();
+  const hasNeeds=Object.keys(needs).length>0;
+
+  // Calcular cobertura real por hora (cuántas personas hay en cada franja)
+  function coveredAtHour(h){
+    return ds2.filter(s=>{
+      const sh=parseInt(s.start);
+      const eh=parseInt(s.end)||0;
+      if(eh===0||eh<sh){ // turno cruza medianoche
+        return h>=sh||h<eh;
+      }
+      return h>=sh&&h<eh;
+    }).length;
+  }
+
+  // Horas activas: de 10 a 1 (cierre)
+  const HOURS=[10,11,12,13,14,15,16,17,18,19,20,21,22,23,0];
+
+  // Construir tabla de cobertura
+  const coverageRows=hasNeeds?HOURS.map(h=>{
+    const need=parseInt(needs[String(h)]?.[String(dow)]||0);
+    const covered=coveredAtHour(h);
+    const diff=covered-need;
+    const pctBar=need>0?Math.min(100,Math.round(covered/need*100)):covered>0?100:0;
+    const barColor=diff<0?'var(--red)':diff===0?'var(--green)':'var(--amber)';
+    const label=h===0?'00:00–01:00':`${String(h).padStart(2,'0')}:00–${String(h+1).padStart(2,'0')}:00`;
+    return`<tr style="${diff<0?'background:rgba(239,68,68,.05)':''}">
+      <td style="font-family:var(--mono);font-size:11px;color:var(--text3);padding:3px 8px;white-space:nowrap">${label}</td>
+      <td style="text-align:center;font-weight:600;font-size:12px;padding:3px 6px">${need}</td>
+      <td style="text-align:center;font-size:12px;padding:3px 6px;color:${barColor};font-weight:600">${covered}</td>
+      <td style="padding:3px 8px;min-width:80px">
+        <div style="display:flex;align-items:center;gap:4px">
+          <div style="flex:1;background:var(--bg3);border-radius:3px;height:6px">
+            <div style="width:${pctBar}%;background:${barColor};height:6px;border-radius:3px;max-width:100%"></div>
+          </div>
+          <span style="font-size:10px;color:${barColor};min-width:24px;text-align:right">${diff>=0?'+':''}${diff}</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join(''):'';
+
+  // Resumen cobertura total
+  let totalNeed=0, totalCovered=0, horasDeficit=0;
+  if(hasNeeds){
+    HOURS.forEach(h=>{
+      const n=parseInt(needs[String(h)]?.[String(dow)]||0);
+      const c=coveredAtHour(h);
+      totalNeed+=n; totalCovered+=c;
+      if(c<n) horasDeficit++;
+    });
+  }
 
   el.innerHTML=`<div class="card" style="margin-top:16px">
     <div class="card-header">
@@ -2259,7 +2311,8 @@ function calClick(ds){
         <button class="btn btn-primary btn-sm" onclick="shiftMdl('${ds}')"><i class="fa fa-plus"></i> Añadir turno</button>
       </div>
     </div>
-    ${vacas.length?`<div style="margin-bottom:8px">${vacas.map(v=>{
+
+    ${vacas.length?`<div style="margin:8px 16px 0">${vacas.map(v=>{
       const e=DB.employees.find(x=>x.id===v.employee_id);
       return`<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--amber);padding:6px 10px;background:rgba(245,158,11,.08);border-radius:6px;margin-bottom:4px">
         <i class="fa fa-umbrella-beach"></i>
@@ -2267,6 +2320,7 @@ function calClick(ds){
         <button class="btn btn-danger btn-sm btn-icon" onclick="delVacDay(${v.id},'${ds}')" title="Quitar vacaciones"><i class="fa fa-xmark"></i></button>
       </div>`;
     }).join('')}</div>`:''}
+
     ${ds2.length?`<div class="table-wrap"><table>
       <thead><tr><th>Empleado</th><th>Entrada</th><th>Salida</th><th>Horas</th><th>Coste</th><th></th></tr></thead>
       <tbody>${ds2.map(s=>{
@@ -2296,6 +2350,26 @@ function calClick(ds){
       </tr>
       </tbody></table></div>`
     :'<div style="color:var(--text3);padding:12px;font-size:13px">Sin turnos asignados. <a href="#" onclick="shiftMdl(\''+ds+'\')" style="color:var(--accent)">Añadir turno</a> o <a href="#" onclick="applyTemplateDayMdl(\''+ds+'\')" style="color:var(--accent)">aplicar plantilla</a>.</div>'}
+
+    ${hasNeeds?`
+    <div style="padding:10px 16px;border-top:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-weight:600;font-size:13px"><i class="fa fa-chart-bar" style="color:var(--accent)"></i> Cobertura vs necesidades</span>
+        <div style="display:flex;gap:8px;font-size:11px">
+          ${horasDeficit>0?`<span style="color:var(--red)">⚠ ${horasDeficit} franjas con déficit</span>`:`<span style="color:var(--green)">✓ Cobertura completa</span>`}
+        </div>
+      </div>
+      <div class="table-wrap"><table style="min-width:300px">
+        <thead><tr>
+          <th style="padding:3px 8px;font-size:11px">Franja</th>
+          <th style="text-align:center;padding:3px 6px;font-size:11px;color:var(--text3)">Necesario</th>
+          <th style="text-align:center;padding:3px 6px;font-size:11px;color:var(--accent)">Cubierto</th>
+          <th style="padding:3px 8px;font-size:11px">Cobertura</th>
+        </tr></thead>
+        <tbody>${coverageRows}</tbody>
+      </table></div>
+    </div>
+    `:''}
   </div>`;
 }
 
@@ -2338,26 +2412,36 @@ function delVacDay(vacId, ds){
   save(); flash('✓ Vacaciones eliminadas'); calClick(ds); go('schedule');
 }
 
-// Necesidades de personal por hora: {hora: {dow: nPersonas}}
-// Se carga desde STAFF_NEEDS_SEED (Excel importado) o desde DB.staffNeeds
-function getStaffNeeds(){
-  if(DB.staffNeeds && Object.keys(DB.staffNeeds).length > 0) return DB.staffNeeds;
+// getStaffNeeds: devuelve la tabla de necesidades activa para una fecha dada
+// Busca en staffSeasons la temporada vigente; si no, usa staffNeeds (legacy) o STAFF_NEEDS_SEED
+function getStaffNeeds(ds){
+  const date = ds || today();
+  // Buscar temporada activa para esa fecha
+  if(DB.staffSeasons && DB.staffSeasons.length){
+    const season = DB.staffSeasons.find(s=>s.from<=date && s.to>=date);
+    if(season && season.needs && Object.keys(season.needs).length) return season.needs;
+    // Si no hay temporada exacta, usar la más reciente anterior
+    const past = DB.staffSeasons.filter(s=>s.from<=date).sort((a,b)=>b.from.localeCompare(a.from));
+    if(past.length) return past[0].needs;
+  }
+  // Legacy: DB.staffNeeds (objeto plano de versiones anteriores)
+  if(DB.staffNeeds && Object.keys(DB.staffNeeds).length) return DB.staffNeeds;
+  // Seed embebido
   if(typeof STAFF_NEEDS_SEED !== 'undefined') return STAFF_NEEDS_SEED;
   return {};
 }
 
-// Número de personas necesarias en un turno (start→end) para un día
-// Toma el máximo de personas necesarias en cualquier hora del turno
-function staffForShift(start, end, dow){
-  const needs = getStaffNeeds();
+// staffForShift: personas necesarias en un turno para un día concreto
+function staffForShift(start, end, dow, ds){
+  const needs = getStaffNeeds(ds);
   if(!Object.keys(needs).length) return 0;
   const hStart = parseInt(start);
-  const hEnd = parseInt(end) || (parseInt(end)===0?24:parseInt(end));
+  const hEnd = parseInt(end) || 0;
   let max = 0;
-  for(let h = hStart; h < (hEnd>hStart?hEnd:hEnd+24); h++){
-    const hk = String(h % 24);
-    const n = needs[hk] ? (needs[hk][String(dow)]||0) : 0;
+  for(let h = hStart; h !== hEnd; h = (h+1)%24){
+    const n = needs[String(h)] ? (needs[String(h)][String(dow)]||0) : 0;
     if(n > max) max = n;
+    if(h === 23 && hEnd === 0) break;
   }
   return max;
 }
@@ -2492,11 +2576,11 @@ function autoplanMonth(y, m){
     disponibles.forEach(e=>{hrsMap[e.id]=hrsInMonth(e.id,mStr);});
     const encDisp=disponibles.filter(e=>ENCARGADOS.includes(e.id));
 
-    const hasNeeds=Object.keys(getStaffNeeds()).length>0;
+    const hasNeeds=Object.keys(getStaffNeeds(ds)).length>0;
     let nP,nC,nN;
     if(hasNeeds){
-      const nCo=staffForShift(SH.comida.start,SH.comida.end,dow);
-      const nCe=staffForShift(SH.cena.start,SH.cena.end,dow);
+      const nCo=staffForShift(SH.comida.start,SH.comida.end,dow,ds);
+      const nCe=staffForShift(SH.cena.start,SH.cena.end,dow,ds);
       nP=Math.max(0,Math.min(nCo,nCe)+factor);
       nC=Math.max(0,nCo-nP);
       nN=Math.max(0,nCe-nP+factor);
@@ -2562,6 +2646,56 @@ function autoplanMonth(y, m){
       asignados.add(emp.id);hrsMap[emp.id]=(hrsMap[emp.id]||0)+hrsOf(s,e);added++;
     });
     if(empN.length<nN)warnings.push(`${ds} cena insuf: ${empN.length}/${nN}`);
+  }
+
+  // Generar alertas visibles para días con déficit de cobertura
+  const needs = getStaffNeeds(`${mStr}-01`);
+  if(Object.keys(needs).length){
+    // Eliminar alertas previas de cobertura de este mes
+    DB.alerts = DB.alerts.filter(a=>!(a._sk&&a._sk.startsWith(`cov_${mStr}`)));
+    const mLabel=new Date(y,m-1,1).toLocaleString('es-ES',{month:'long',year:'numeric'});
+    const deficitDays=[];
+    for(let d=1;d<=days;d++){
+      const ds=`${mStr}-${String(d).padStart(2,'0')}`;
+      const dow=new Date(ds).getDay();
+      const shifts=DB.shifts.filter(s=>s.date===ds);
+      if(!shifts.length) continue;
+      function covAt(h){
+        return shifts.filter(s=>{
+          const sh=parseInt(s.start), eh=parseInt(s.end)||0;
+          if(eh===0||eh<sh) return h>=sh||h<eh;
+          return h>=sh&&h<eh;
+        }).length;
+      }
+      const HOURS=[10,11,12,13,14,15,16,17,18,19,20,21,22,23,0];
+      let maxDeficit=0, worstHour='';
+      HOURS.forEach(h=>{
+        const need=parseInt(needs[String(h)]?.[String(dow)]||0);
+        const cov=covAt(h);
+        const def=need-cov;
+        if(def>maxDeficit){maxDeficit=def;worstHour=`${String(h).padStart(2,'0')}:00`;}
+      });
+      if(maxDeficit>0) deficitDays.push({ds,dow,maxDeficit,worstHour});
+    }
+    if(deficitDays.length>0){
+      const detail=deficitDays.slice(0,5).map(d=>
+        `${new Date(d.ds).toLocaleDateString('es-ES',{weekday:'short',day:'numeric'})}: faltan ${d.maxDeficit}p a las ${d.worstHour}`
+      ).join(' · ')+(deficitDays.length>5?` · +${deficitDays.length-5} más`:'');
+      DB.alerts.push({
+        id:maxId(DB.alerts),
+        sev:'warning',
+        msg:`Cobertura insuficiente en ${deficitDays.length} día${deficitDays.length>1?'s':''} de ${mLabel}`,
+        soluciones:[
+          detail,
+          'Revisa el cuadrante — pincha cada día para ver la cobertura hora a hora',
+          deficitDays.length>3?'Considera añadir refuerzo o ajustar los turnos manualmente':
+            'Puedes añadir turno manual en los días afectados desde el cuadrante'
+        ],
+        mStr, done:false,
+        _sk:`cov_${mStr}_${Date.now()}`,
+        ts:new Date().toLocaleDateString('es-ES')
+      });
+    }
   }
 
   save();
@@ -4408,8 +4542,222 @@ const RULE_TYPES = [
   {id:'rest_min',   label:'Descanso mínimo entre turnos', desc:'Mínimo de horas entre el fin de un turno y el inicio del siguiente', icon:'fa-clock', color:'var(--teal)'},
 ];
 
+function renderSeasonsTable(){
+  if(!DB.staffSeasons) DB.staffSeasons=[];
+  const t=today();
+  const seasons=DB.staffSeasons.slice().sort((a,b)=>a.from.localeCompare(b.from));
+
+  // Incluir siempre la temporada base del seed
+  const hasSeed = typeof STAFF_NEEDS_SEED !== 'undefined';
+  const seedActive = !seasons.some(s=>s.from<=t&&s.to>=t);
+
+  if(!seasons.length && !hasSeed) return `<div style="padding:20px;text-align:center;color:var(--text3);font-size:13px">
+    <i class="fa fa-calendar-plus" style="font-size:24px;display:block;margin-bottom:8px;color:var(--accent)"></i>
+    Sin temporadas configuradas. Crea una para empezar.
+  </div>`;
+
+  const rows = seasons.map(s=>{
+    const isActive = s.from<=t && s.to>=t;
+    return`<tr style="${isActive?'background:rgba(79,124,255,.06)':''}">
+      <td style="font-weight:${isActive?'700':'400'}">${s.name} ${isActive?'<span class="badge badge-green">Activa</span>':''}</td>
+      <td style="font-family:var(--mono);font-size:12px">${s.from}</td>
+      <td style="font-family:var(--mono);font-size:12px">${s.to}</td>
+      <td style="font-size:12px;color:var(--text3)">${Object.keys(s.needs||{}).length} franjas horarias</td>
+      <td style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="viewSeasonMdl(${s.id})"><i class="fa fa-eye"></i></button>
+        <button class="btn btn-secondary btn-sm" onclick="editSeasonMdl(${s.id})"><i class="fa fa-pencil"></i></button>
+        <button class="btn btn-danger btn-sm btn-icon" onclick="deleteSeason(${s.id})"><i class="fa fa-trash"></i></button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const seedRow = hasSeed ? `<tr style="${seedActive?'background:rgba(79,124,255,.06)':'opacity:.6'}">
+    <td style="font-weight:${seedActive?'700':'400'}">Base (Restalia) ${seedActive?'<span class="badge badge-green">Activa</span>':'<span class="badge badge-gray">Fallback</span>'}</td>
+    <td style="font-family:var(--mono);font-size:12px;color:var(--text3)">siempre</td>
+    <td style="font-family:var(--mono);font-size:12px;color:var(--text3)">siempre</td>
+    <td style="font-size:12px;color:var(--text3)">${Object.keys(STAFF_NEEDS_SEED).length} franjas · desde Excel</td>
+    <td></td>
+  </tr>` : '';
+
+  return`<div>
+    <div style="padding:8px 16px 0;font-size:12px;color:var(--text2)">
+      <i class="fa fa-circle-info" style="color:var(--accent)"></i>
+      El autoplanificador usa la temporada vigente en la fecha del cuadrante. Si no hay ninguna activa, usa la base.
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Temporada</th><th>Desde</th><th>Hasta</th><th>Datos</th><th>Acciones</th></tr></thead>
+      <tbody>${rows}${seedRow}</tbody>
+    </table></div>
+  </div>`;
+}
+
+function newSeasonMdl(prefillNeeds){
+  const now=new Date(), y=now.getFullYear(), m=now.getMonth()+1;
+  const from=`${y}-${String(m).padStart(2,'0')}-01`;
+  const to=`${y}-${String(m).padStart(2,'0')}-${new Date(y,m,0).getDate()}`;
+  modal(`<div class="modal" style="max-width:420px">
+    <div class="modal-header"><h3 class="modal-title"><i class="fa fa-calendar-plus"></i> Nueva temporada de personal</h3></div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:10px">
+      <div>
+        <label style="font-size:12px;color:var(--text3)">Nombre</label>
+        <input type="text" id="snName" placeholder="Ej: Temporada alta verano, Navidad, Base..." value="${prefillNeeds?'Temporada ':''}"
+          style="width:100%;margin-top:4px;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;box-sizing:border-box">
+      </div>
+      <div style="display:flex;gap:10px">
+        <div style="flex:1"><label style="font-size:12px;color:var(--text3)">Desde</label>
+          <input type="date" id="snFrom" value="${from}" style="width:100%;margin-top:4px;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;box-sizing:border-box"></div>
+        <div style="flex:1"><label style="font-size:12px;color:var(--text3)">Hasta</label>
+          <input type="date" id="snTo" value="${to}" style="width:100%;margin-top:4px;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;box-sizing:border-box"></div>
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text3)">Tabla de necesidades (Excel .xlsx)</label>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:10px;background:var(--bg3);border:1px dashed var(--border2);border-radius:6px;cursor:pointer">
+          <i class="fa fa-file-excel" style="color:var(--green)"></i>
+          <span style="font-size:13px;color:var(--text2)" id="snFileName">Seleccionar archivo…</span>
+          <input type="file" id="snFile" accept=".xlsx,.xls" style="display:none" onchange="document.getElementById('snFileName').textContent=this.files[0]?.name||'Seleccionar archivo…'">
+        </label>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Mismo formato que el Excel de Restalia: filas=horas, columnas=días</div>
+      </div>
+      ${prefillNeeds?`<div style="background:rgba(79,124,255,.08);border:1px solid rgba(79,124,255,.2);border-radius:6px;padding:8px;font-size:12px;color:var(--text2)">
+        <i class="fa fa-circle-info" style="color:var(--accent)"></i> Si no subes Excel, se usarán los datos actuales del seed base.
+      </div>`:''}
+    </div>
+    <div class="modal-footer" style="justify-content:flex-end;display:flex;gap:8px">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveSeason()"><i class="fa fa-check"></i> Guardar temporada</button>
+    </div>
+  </div>`);
+}
+
+function saveSeason(){
+  const name=document.getElementById('snName').value.trim();
+  const from=document.getElementById('snFrom').value;
+  const to=document.getElementById('snTo').value;
+  const file=document.getElementById('snFile').files[0];
+  if(!name||!from||!to){alert('Rellena nombre y fechas');return;}
+  if(from>to){alert('La fecha de inicio debe ser anterior al final');return;}
+
+  function doSave(needs){
+    if(!DB.staffSeasons) DB.staffSeasons=[];
+    const season={id:Date.now(), name, from, to, needs:needs||{}};
+    DB.staffSeasons.push(season);
+    DB.staffSeasons.sort((a,b)=>a.from.localeCompare(b.from));
+    save();
+    audit('staff_season',`Temporada creada: ${name} (${from}→${to})`);
+    flash(`✓ Temporada "${name}" guardada`);
+    closeModal();
+    go('assignRules');
+  }
+
+  if(file){
+    const r=new FileReader();
+    r.onload=e=>{
+      try{
+        const wb=XLSX.read(e.target.result,{type:'array'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        const needs=parseStaffNeedsFromRows(rows);
+        if(!needs){alert('No se pudo leer el archivo. Verifica el formato.');return;}
+        doSave(needs);
+      }catch(err){alert('Error: '+err.message);}
+    };
+    r.readAsArrayBuffer(file);
+  } else {
+    // Sin archivo: usar seed base como punto de partida
+    doSave(typeof STAFF_NEEDS_SEED!=='undefined'?{...STAFF_NEEDS_SEED}:{});
+  }
+}
+
+function parseStaffNeedsFromRows(rows){
+  let headerRow=-1; const dowNames={'lunes':1,'martes':2,'miércoles':3,'miercoles':3,'jueves':4,'viernes':5,'sábado':6,'sabado':6,'domingo':0};
+  for(let i=0;i<Math.min(5,rows.length);i++){
+    if(rows[i].filter(c=>dowNames[String(c).toLowerCase().trim()]).length>=5){headerRow=i;break;}
+  }
+  if(headerRow<0) return null;
+  const dowCols={};
+  rows[headerRow].forEach((c,i)=>{const k=dowNames[String(c).toLowerCase().trim()];if(k!==undefined)dowCols[i]=k;});
+  const needs={};
+  for(let i=headerRow+1;i<rows.length;i++){
+    const row=rows[i], horaStr=String(row[0]||'').trim();
+    if(!horaStr||horaStr.toLowerCase().includes('total'))continue;
+    const hMatch=horaStr.match(/^(\d{1,2})/); if(!hMatch)continue;
+    let h=parseInt(hMatch[1]); if(h===24)h=0;
+    needs[String(h)]={};
+    Object.entries(dowCols).forEach(([col,dow])=>{needs[String(h)][String(dow)]=parseInt(row[col])||0;});
+  }
+  return Object.keys(needs).length>=5?needs:null;
+}
+
+function viewSeasonMdl(id){
+  const s=DB.staffSeasons.find(x=>x.id===id); if(!s)return;
+  // Temporarily override getStaffNeeds to show this season's table
+  const old=DB.staffSeasons;
+  DB.staffNeeds=s.needs; // use legacy field for renderStaffNeedsTable
+  modal(`<div class="modal" style="max-width:650px">
+    <div class="modal-header"><h3 class="modal-title"><i class="fa fa-table"></i> ${s.name}</h3>
+    <span style="font-size:12px;color:var(--text3)">${s.from} → ${s.to}</span></div>
+    <div class="modal-body" style="padding:0">${renderStaffNeedsTable()}</div>
+    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Cerrar</button></div>
+  </div>`);
+  DB.staffNeeds={}; // restore
+}
+
+function editSeasonMdl(id){
+  const s=DB.staffSeasons.find(x=>x.id===id); if(!s)return;
+  modal(`<div class="modal" style="max-width:420px">
+    <div class="modal-header"><h3 class="modal-title"><i class="fa fa-pencil"></i> Editar temporada</h3></div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:10px">
+      <div><label style="font-size:12px;color:var(--text3)">Nombre</label>
+        <input type="text" id="snName" value="${s.name}" style="width:100%;margin-top:4px;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;box-sizing:border-box"></div>
+      <div style="display:flex;gap:10px">
+        <div style="flex:1"><label style="font-size:12px;color:var(--text3)">Desde</label>
+          <input type="date" id="snFrom" value="${s.from}" style="width:100%;margin-top:4px;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;box-sizing:border-box"></div>
+        <div style="flex:1"><label style="font-size:12px;color:var(--text3)">Hasta</label>
+          <input type="date" id="snTo" value="${s.to}" style="width:100%;margin-top:4px;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;box-sizing:border-box"></div>
+      </div>
+      <div><label style="font-size:12px;color:var(--text3)">Actualizar tabla (opcional)</label>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:10px;background:var(--bg3);border:1px dashed var(--border2);border-radius:6px;cursor:pointer">
+          <i class="fa fa-file-excel" style="color:var(--green)"></i>
+          <span style="font-size:13px;color:var(--text2)" id="snFileName">Seleccionar nuevo Excel…</span>
+          <input type="file" id="snFile" accept=".xlsx,.xls" style="display:none" onchange="document.getElementById('snFileName').textContent=this.files[0]?.name||'Seleccionar…'">
+        </label></div>
+    </div>
+    <div class="modal-footer" style="justify-content:flex-end;display:flex;gap:8px">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="updateSeason(${id})"><i class="fa fa-check"></i> Guardar</button>
+    </div>
+  </div>`);
+}
+
+function updateSeason(id){
+  const s=DB.staffSeasons.find(x=>x.id===id); if(!s)return;
+  s.name=document.getElementById('snName').value.trim()||s.name;
+  s.from=document.getElementById('snFrom').value||s.from;
+  s.to=document.getElementById('snTo').value||s.to;
+  const file=document.getElementById('snFile').files[0];
+  function doUpdate(needs){
+    if(needs) s.needs=needs;
+    DB.staffSeasons.sort((a,b)=>a.from.localeCompare(b.from));
+    save(); flash('✓ Temporada actualizada'); closeModal(); go('assignRules');
+  }
+  if(file){
+    const r=new FileReader(); r.onload=e=>{
+      try{const wb=XLSX.read(e.target.result,{type:'array'});const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        doUpdate(parseStaffNeedsFromRows(rows));
+      }catch(err){alert('Error: '+err.message);}
+    }; r.readAsArrayBuffer(file);
+  } else doUpdate(null);
+}
+
+function deleteSeason(id){
+  if(!confirm('¿Eliminar esta temporada?'))return;
+  DB.staffSeasons=DB.staffSeasons.filter(s=>s.id!==id);
+  save(); flash('✓ Temporada eliminada'); go('assignRules');
+}
+
 function renderStaffNeedsTable(){
-  const needs=getStaffNeeds();
+  const needs=DB.staffNeeds&&Object.keys(DB.staffNeeds).length?DB.staffNeeds:getStaffNeeds(today());
   if(!Object.keys(needs).length) return '<div style="padding:20px;text-align:center;color:var(--text3);font-size:13px"><i class="fa fa-file-excel" style="font-size:24px;margin-bottom:8px;display:block;color:var(--teal)"></i>Sube el Excel de necesidades (formato: filas=horas, columnas=días de semana)</div>';
   const dows=[{d:1,l:'Lun'},{d:2,l:'Mar'},{d:3,l:'Mié'},{d:4,l:'Jue'},{d:5,l:'Vie'},{d:6,l:'Sáb'},{d:0,l:'Dom'}];
   const hours=Object.keys(needs).map(Number).sort((a,b)=>a-b);
@@ -4490,26 +4838,15 @@ function pgAssignRules(){
     <!-- Análisis de plantilla vs necesidades -->
     ${analysis ? renderStaffingAnalysis(analysis) : ''}
 
-    <!-- Necesidades de personal por hora -->
+    <!-- Temporadas de necesidades de personal -->
     <div class="card">
       <div class="card-header">
-        <span class="card-title"><i class="fa fa-table"></i> Necesidades de personal por hora</span>
+        <span class="card-title"><i class="fa fa-calendar-days"></i> Necesidades de personal por temporada</span>
         <div style="display:flex;gap:8px;align-items:center">
-          <span style="font-size:11px;color:var(--text3)">${Object.keys(getStaffNeeds()).length>0?'Datos cargados':'Sin datos'}</span>
-          <label class="btn btn-secondary btn-sm" style="cursor:pointer">
-            <i class="fa fa-file-excel"></i> Importar Excel
-            <input type="file" accept=".xlsx,.xls" style="display:none" onchange="impStaffNeeds(this)">
-          </label>
-          ${Object.keys(getStaffNeeds()).length>0?`<button class="btn btn-danger btn-sm btn-icon" onclick="clearStaffNeeds()" title="Borrar tabla"><i class="fa fa-trash"></i></button>`:''}
+          <button class="btn btn-secondary btn-sm" onclick="newSeasonMdl()"><i class="fa fa-plus"></i> Nueva temporada</button>
         </div>
       </div>
-      ${renderStaffNeedsTable()}
-      <div style="padding:8px 16px;font-size:11px;color:var(--text3);border-top:1px solid var(--border)">
-        <i class="fa fa-circle-info"></i> El autoplanificador usa estos datos para calcular cuántas personas asignar en cada turno.
-        <span style="background:rgba(79,124,255,0.2);padding:1px 6px;border-radius:3px">bajo</span>
-        <span style="background:rgba(245,158,11,0.5);padding:1px 6px;border-radius:3px;margin-left:4px">medio</span>
-        <span style="background:rgba(239,68,68,0.5);padding:1px 6px;border-radius:3px;margin-left:4px">alto</span>
-      </div>
+      ${renderSeasonsTable()}
     </div>
 
     <!-- Reglas activas -->
@@ -5670,14 +6007,14 @@ function pgReports(){
 // ═══════════════════════════════════════════════════════════
 function exportBackup(){
   try{
-    const p={};['employees','shifts','vacations','alerts','bankMovements','fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory','stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog','staffNeeds'].forEach(k=>{p[k]=DB[k];});
+    const p={};['employees','shifts','vacations','alerts','bankMovements','fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory','stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog','staffNeeds','staffSeasons'].forEach(k=>{p[k]=DB[k];});
     p._v='biconcepto_v3';p._t=new Date().toISOString();
     const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(p,null,2)],{type:'application/json'}));a.download='backup_biconcepto_'+today()+'.json';a.click();
   }catch(e){alert('Error: '+e.message);}
 }
 function importBackup(){
   const inp=document.createElement('input');inp.type='file';inp.accept='.json';
-  inp.onchange=e=>{const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p._v){alert('Archivo no válido');return;}['employees','shifts','vacations','alerts','bankMovements','fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory','stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog','staffNeeds'].forEach(k=>{if(p[k]!==undefined)DB[k]=p[k];});save();location.reload();}catch(err){alert('Error: '+err.message);}};r.readAsText(e.target.files[0]);};inp.click();
+  inp.onchange=e=>{const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p._v){alert('Archivo no válido');return;}['employees','shifts','vacations','alerts','bankMovements','fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory','stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog','staffNeeds','staffSeasons'].forEach(k=>{if(p[k]!==undefined)DB[k]=p[k];});save();location.reload();}catch(err){alert('Error: '+err.message);}};r.readAsText(e.target.files[0]);};inp.click();
 }
 function clearStorage(){if(!confirm('¿Borrar TODOS los datos?\n\nNo se puede deshacer.'))return;_store.removeItem('biconcepto_v3');location.reload();}
 
