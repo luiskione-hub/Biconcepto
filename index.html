@@ -488,9 +488,10 @@ textarea.form-control { resize: vertical; min-height: 80px; }
     <h1>Gestión Biconcepto</h1>
     <p class="login-sub">Ceuta · Sistema de gestión integral</p>
     <div class="login-form">
-      <input type="text"     id="loginUser" placeholder="Usuario"    value="gerente">
+      <input type="text"     id="loginUser" placeholder="Usuario"    value="admin">
       <input type="password" id="loginPass" placeholder="Contraseña" value="1234">
       <button id="btnLogin" class="btn-login">Entrar</button>
+      <div id="loginError" style="color:#e74c3c;font-size:12px;margin-top:8px;min-height:16px"></div>
     </div>
     <div class="login-roles">
       <span id="qlAdmin">Admin</span>
@@ -1383,15 +1384,17 @@ function _applyData(p){
   }
 
   // 2. Intentar Supabase en segundo plano
-  // Si tiene datos más recientes, aplicarlos y refrescar la UI
+  // Si tiene datos más recientes, aplicarlos EXCEPTO los usuarios
+  // (para evitar quedar bloqueado por contraseñas antiguas en Supabase)
   supabaseLoad().then(row=>{
     if(!row){ updateSyncIndicator(DB._t?'error':'local'); return; }
     const supaT=new Date(row.updated_at||0).getTime();
     const localT=new Date(DB._t||0).getTime();
-    if(supaT>localT+5000){ // Supabase tiene datos >5s más recientes
+    if(supaT>localT+5000){
+      const usersBackup=DB.users; // guardar usuarios actuales (con contraseñas válidas)
       _applyData(row.data);
+      DB.users=usersBackup; // restaurar usuarios — las contraseñas vienen del código
       try{ _store.setItem('biconcepto_v3',JSON.stringify(row.data)); }catch(e){}
-      // Refrescar UI si ya está visible
       if(DB.currentUser){
         const cur=document.querySelector('.nav-item.active');
         if(cur) go(cur.dataset.page||'dashboard');
@@ -1639,21 +1642,33 @@ function audit(action, detail){
 function doLogin(){
   try {
     const u=$('loginUser').value.trim(), p=$('loginPass').value.trim();
-    const user=DB.users.find(x=>x.user===u&&x.pass===p);
-    if(!user){alert('Usuario o contraseña incorrectos');return;}
+    const errEl=$('loginError');
+    if(errEl) errEl.textContent='';
+    if(!u||!p){
+      if(errEl) errEl.textContent='Introduce usuario y contraseña';
+      return;
+    }
+    // Buscar usuario — comparar en minúsculas para evitar problemas de mayúsculas
+    const user=DB.users.find(x=>x.user&&x.user.toLowerCase()===u.toLowerCase()&&x.pass===p);
+    if(!user){
+      // Debug: mostrar qué usuarios existen
+      const userList=DB.users.map(x=>x.user).join(', ');
+      if(errEl) errEl.textContent='Usuario o contraseña incorrectos. Usuarios: '+userList;
+      return;
+    }
     DB.currentUser=user;
-    // Si es la primera vez o el admin ha forzado cambio de contraseña
     if(user.mustChange){
       $('loginScreen').classList.add('hidden');
       $('app').classList.remove('hidden');
       forceChangePassMdl(user);
       return;
     }
-    audit('login',`Inicio de sesión`);
+    audit('login','Inicio de sesión: '+user.name);
     launchApp();
   } catch(e) {
-    console.error('❌ Error en doLogin:', e);
-    alert('Error al entrar: ' + e.message);
+    const errEl=$('loginError');
+    if(errEl) errEl.textContent='Error: '+e.message;
+    console.error('doLogin error:', e);
   }
 }
 
