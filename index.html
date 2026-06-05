@@ -569,6 +569,7 @@ textarea.form-control { resize: vertical; min-height: 80px; }
         <div class="user-role" id="userRole">Gerente</div>
       </div>
       <button onclick="recalcularTodo()" class="btn-logout" title="Recalcular previsiones y alertas" style="color:var(--teal)"><i class="fa fa-rotate"></i></button>
+      <span id="_syncBadge" style="padding:6px;cursor:default"><i class="fa fa-circle-dot" style="color:var(--text3)" title="Estado sincronización"></i></span>
       <button onclick="doLogout()" class="btn-logout" title="Cerrar sesión"><i class="fa fa-right-from-bracket"></i></button>
     </div>
   </aside>
@@ -1327,47 +1328,108 @@ const _store = {
 };
 
 // ─── Load persisted data ─────────────────────────────────────
-(function(){
-  try {
-    const raw = _store.getItem('biconcepto_v3');
-    if (raw) {
-      const p = JSON.parse(raw);
-      const keys = ['employees','shifts','vacations','alerts','bankMovements',
-                    'fixedCosts','obj','legal','conv','jibbleData','_log','salesHistory',
-                    'stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog','staffNeeds','staffSeasons'];
-      keys.forEach(k => { if (p[k] !== undefined) DB[k] = p[k]; });
-    }
-    // ── Actualizar salesHistory con seed corregido ────────────
-    // Sobreescribe los importes del seed aunque la fecha ya exista
-    // (corrige datos importados con cálculo incorrecto en versiones anteriores)
-    if(typeof SALES_HISTORY_SEED !== 'undefined' && SALES_HISTORY_SEED.length > 0){
-      const seedVersion = 'v5'; // incrementar para forzar actualización
-      const savedVersion = p && p._seedVersion;
-      if(savedVersion !== seedVersion){
-        // Actualizar importes del seed (pueden haber cambiado con el recálculo)
-        const byDate = {};
-        DB.salesHistory.forEach(s=>{ byDate[s.date]=s; });
-        SALES_HISTORY_SEED.forEach(s=>{
-          if(byDate[s.date]){
-            // Actualizar si vino del seed anterior (no sobreescribir imports manuales del usuario)
-            if(byDate[s.date]._src==='hist'||!byDate[s.date]._src){
-              byDate[s.date].amount = s.amount;
-              byDate[s.date]._src = 'hist';
-            }
-          } else {
-            DB.salesHistory.push({...s, id: DB.salesHistory.length+1});
+const _KEYS = ['employees','shifts','vacations','alerts','bankMovements','fixedCosts',
+               'obj','legal','conv','jibbleData','_log','salesHistory',
+               'stockItems','stockOrders','stockSnapshots','planConfig','rolePerms',
+               'auditLog','staffNeeds','staffSeasons'];
+
+function _applyData(p){
+  _KEYS.forEach(k=>{ if(p[k]!==undefined) DB[k]=p[k]; });
+  if(p._seedVersion) DB._seedVersion=p._seedVersion;
+  if(p._t) DB._t=p._t;
+  // Actualizar salesHistory con seed corregido
+  if(typeof SALES_HISTORY_SEED!=='undefined' && SALES_HISTORY_SEED.length>0){
+    const seedVersion='v5';
+    if(DB._seedVersion!==seedVersion){
+      const byDate={};
+      DB.salesHistory.forEach(s=>{ byDate[s.date]=s; });
+      SALES_HISTORY_SEED.forEach(s=>{
+        if(byDate[s.date]){
+          if(byDate[s.date]._src==='hist'||!byDate[s.date]._src){
+            byDate[s.date].amount=s.amount; byDate[s.date]._src='hist';
           }
-        });
-        DB.salesHistory.sort((a,b)=>a.date.localeCompare(b.date));
-        DB._seedVersion = seedVersion;
-        try{ _store.setItem('biconcepto_v3', JSON.stringify(DB)); }catch(e){}
+        } else { DB.salesHistory.push({...s,id:DB.salesHistory.length+1}); }
+      });
+      DB.salesHistory.sort((a,b)=>a.date.localeCompare(b.date));
+      DB._seedVersion=seedVersion;
+    }
+  }
+}
+
+(function(){
+  // 1. Cargar localStorage inmediatamente (sin espera, funciona offline)
+  try{
+    const raw=_store.getItem('biconcepto_v3');
+    if(raw){ _applyData(JSON.parse(raw)); updateSyncIndicator('local'); }
+  }catch(e){}
+
+  // 2. Intentar Supabase en segundo plano
+  // Si tiene datos más recientes, aplicarlos y refrescar la UI
+  supabaseLoad().then(row=>{
+    if(!row){ updateSyncIndicator(DB._t?'error':'local'); return; }
+    const supaT=new Date(row.updated_at||0).getTime();
+    const localT=new Date(DB._t||0).getTime();
+    if(supaT>localT+5000){ // Supabase tiene datos >5s más recientes
+      _applyData(row.data);
+      try{ _store.setItem('biconcepto_v3',JSON.stringify(row.data)); }catch(e){}
+      // Refrescar UI si ya está visible
+      if(DB.currentUser){
+        const cur=document.querySelector('.nav-item.active');
+        if(cur) go(cur.dataset.page||'dashboard');
+        updateBadge();
       }
     }
-  } catch(e) { console.warn('Load error:', e); }
+    updateSyncIndicator('synced');
+  }).catch(()=>updateSyncIndicator(DB._t?'error':'local'));
 })();
 
 // ═══════════════════════════════════════════════════════════
-// 3. HELPERS
+// SUPABASE — Sincronización en la nube
+// ═══════════════════════════════════════════════════════════
+const SUPA_URL  = 'https://jlysauptkssjhnrfxdnq.supabase.co';
+const SUPA_KEY  = 'sb_publishable_9NS_1tbVH4LOpwynGjkmjQ_zWk-oJS-';
+const SUPA_HDR  = {'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY};
+
+// Guardar estado completo en Supabase (upsert)
+async function supabaseSave(payload){
+  try{
+    const res = await fetch(`${SUPA_URL}/rest/v1/app_state`, {
+      method:'POST',
+      headers:{...SUPA_HDR,'Prefer':'resolution=merge-duplicates'},
+      body: JSON.stringify({id:'main', data: payload, updated_at: new Date().toISOString()})
+    });
+    return res.ok;
+  }catch(e){ return false; }
+}
+
+// Cargar estado desde Supabase
+async function supabaseLoad(){
+  try{
+    const res = await fetch(`${SUPA_URL}/rest/v1/app_state?id=eq.main&select=data,updated_at`,{
+      headers: SUPA_HDR
+    });
+    if(!res.ok) return null;
+    const rows = await res.json();
+    return rows&&rows.length ? rows[0] : null;
+  }catch(e){ return null; }
+}
+
+// Indicador de estado de sincronización
+let _syncStatus = 'local'; // 'local' | 'syncing' | 'synced' | 'error'
+function updateSyncIndicator(status){
+  _syncStatus = status;
+  const el = document.getElementById('_syncBadge');
+  if(!el) return;
+  const cfg = {
+    local:   {icon:'fa-circle-dot',   color:'var(--text3)',  title:'Solo local'},
+    syncing: {icon:'fa-rotate',       color:'var(--amber)',  title:'Sincronizando…'},
+    synced:  {icon:'fa-cloud-check',  color:'var(--green)',  title:'Sincronizado con Supabase'},
+    error:   {icon:'fa-cloud-slash',  color:'var(--red)',    title:'Error de sincronización (guardado local)'},
+  };
+  const c = cfg[status]||cfg.local;
+  el.innerHTML = `<i class="fa ${c.icon}" style="color:${c.color}" title="${c.title}"></i>`;
+}
+// ─────────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════
 const $     = id => document.getElementById(id);
 const today = () => new Date().toISOString().split('T')[0];
@@ -1441,7 +1503,13 @@ function save() {
      'stockItems','stockOrders','stockSnapshots','planConfig','rolePerms','auditLog','staffNeeds','staffSeasons'].forEach(k=>{p[k]=DB[k];});
     p._t = new Date().toISOString();
     p._seedVersion = DB._seedVersion;
+    // 1. Guardar local siempre (funciona offline)
     _store.setItem('biconcepto_v3', JSON.stringify(p));
+    // 2. Sincronizar con Supabase en segundo plano
+    updateSyncIndicator('syncing');
+    supabaseSave(p).then(ok=>{
+      updateSyncIndicator(ok?'synced':'error');
+    });
   } catch(e) {}
 }
 
@@ -1762,20 +1830,41 @@ function afDashboard(){
 // ─── EMPLOYEES ──────────────────────────────────────────────
 function pgEmployees(){
   const DOW=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-  return`<div class="page-header"><div><h2>Empleados</h2><p>${DB.employees.length} · ${DB.employees.filter(e=>e.sick>0).length} de baja</p></div><div class="page-actions"><button class="btn btn-primary" onclick="empMdl()"><i class="fa fa-plus"></i> Nuevo</button></div></div>
+  return`<div class="page-header">
+    <div><h2>Empleados</h2>
+    <p>${DB.employees.filter(e=>e.active).length} activos · ${DB.employees.filter(e=>e.sick>0).length} de baja · ${DB.employees.filter(e=>!e.active).length} inactivos</p>
+    </div>
+    <div class="page-actions"><button class="btn btn-primary" onclick="empMdl()"><i class="fa fa-plus"></i> Nuevo</button></div>
+  </div>
   <div class="page-body"><div class="card"><div class="table-wrap"><table>
-    <thead><tr><th>Nombre</th><th>Jornada</th><th>€/h</th><th>€/mes</th><th>Días fijos</th><th>Estado</th><th></th></tr></thead>
+    <thead><tr><th>Nombre</th><th>Categoría</th><th>Jornada</th><th>€/h</th><th>Días fijos</th><th>Vacaciones</th><th>Estado</th><th></th></tr></thead>
     <tbody>${DB.employees.map(e=>{
       const fsInfo=e.type==='part'&&e.fs&&e.fs.length
-        ?e.fs.map(f=>`<span style="background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:2px 6px;font-size:10px;font-family:var(--mono);white-space:nowrap">${DOW[f.d]} ${f.s}-${f.e}</span>`).join(' ')
+        ?e.fs.map(f=>`<span style="background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:2px 5px;font-size:10px;font-family:var(--mono);white-space:nowrap">${DOW[f.d]} ${f.s}-${f.e}</span>`).join(' ')
         :e.type==='part'?'<span style="color:var(--red);font-size:11px">⚠ Sin configurar</span>':'<span style="color:var(--text3);font-size:11px">—</span>';
+
+      // Días de vacaciones: total - gastados
+      const vacUsed=DB.vacations.filter(v=>v.employee_id===e.id&&v.status!=='rejected'&&
+        new Date(v.start).getFullYear()===new Date().getFullYear())
+        .reduce((a,v)=>a+(v.days||Math.round((new Date(v.end)-new Date(v.start))/86400000)+1),0);
+      const vacTotal=e.vacDias||30;
+      const vacLeft=vacTotal-vacUsed;
+      const vacColor=vacLeft<=5?'var(--red)':vacLeft<=10?'var(--amber)':'var(--green)';
+
       return`<tr>
-        <td class="td-bold">${e.name}</td>
+        <td>
+          <div style="font-weight:600">${e.name}</div>
+          ${e.tel?`<div style="font-size:11px;color:var(--text3)">${e.tel}</div>`:''}
+        </td>
+        <td style="font-size:12px;color:var(--text2)">${e.cat||'—'}</td>
         <td><span class="badge badge-${e.type==='full'?'blue':'amber'}">${e.wh}h</span></td>
         <td class="td-mono">${e.hc}€</td>
-        <td class="td-mono">${eur(e.mc)}</td>
-        <td style="display:flex;flex-wrap:wrap;gap:3px">${fsInfo}</td>
-        <td>${e.sick>0?'<span class="badge badge-red">🏥 Baja</span>':'<span class="badge badge-green">Activo</span>'}</td>
+        <td style="display:flex;flex-wrap:wrap;gap:3px;max-width:200px">${fsInfo}</td>
+        <td style="text-align:center">
+          <span style="font-weight:600;color:${vacColor}">${vacLeft}</span>
+          <span style="font-size:10px;color:var(--text3)">/${vacTotal}d</span>
+        </td>
+        <td>${e.sick>0?'<span class="badge badge-red">🏥 Baja</span>':e.active?'<span class="badge badge-green">Activo</span>':'<span class="badge badge-gray">Inactivo</span>'}</td>
         <td><button class="btn btn-secondary btn-sm btn-icon" onclick="empMdl(${e.id})"><i class="fa fa-pencil"></i></button></td>
       </tr>`;
     }).join('')}</tbody>
@@ -1785,76 +1874,101 @@ function empMdl(id){
   const e=id?DB.employees.find(x=>x.id===id):null;
   const isPart=e&&e.type==='part';
   const fs=e&&e.fs&&e.fs.length?e.fs:[];
+  window._fsSlots=JSON.parse(JSON.stringify(fs));
   const dows=[{v:1,l:'Lunes'},{v:2,l:'Martes'},{v:3,l:'Miércoles'},{v:4,l:'Jueves'},{v:5,l:'Viernes'},{v:6,l:'Sábado'},{v:0,l:'Domingo'}];
+  const CATS=['Jefe/a de cocina','Cocinero/a','Ayudante cocina','Encargado/a sala','Camarero/a','Ayudante camarero/a','Barista','Limpieza','Otro'];
 
-  // Construir filas de días fijos actuales
   function fsRows(slots){
-    if(!slots.length) return '<div style="color:var(--text3);font-size:12px;padding:8px 0">Sin días fijos configurados</div>';
-    return slots.map((f,i)=>`
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px" id="fsRow${i}">
-        <select style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px;flex:1" data-fs-d="${i}">
-          ${dows.map(d=>`<option value="${d.v}"${f.d===d.v?' selected':''}>${d.l}</option>`).join('')}
-        </select>
-        <input type="time" value="${f.s}" data-fs-s="${i}" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-family:var(--mono);font-size:12px">
-        <span style="color:var(--text3)">→</span>
-        <input type="time" value="${f.e}" data-fs-e="${i}" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-family:var(--mono);font-size:12px">
-        <button type="button" class="btn btn-danger btn-sm btn-icon" onclick="removeFsRow(${i})"><i class="fa fa-xmark"></i></button>
-      </div>`).join('');
+    if(!slots.length) return '<div style="color:var(--text3);font-size:12px;padding:6px 0">Sin días configurados</div>';
+    return slots.map((f,i)=>{
+      const dowOpts=dows.map(d=>'<option value="'+d.v+'"'+(f.d===d.v?' selected':'')+'>'+d.l+'</option>').join('');
+      return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px">'
+        +'<select data-fs-d="'+i+'" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:4px 6px;border-radius:6px;font-size:12px;flex:1">'+dowOpts+'</select>'
+        +'<input type="time" value="'+f.s+'" data-fs-s="'+i+'" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:4px 6px;border-radius:6px;font-family:var(--mono);font-size:12px;width:90px">'
+        +'<span style="color:var(--text3);font-size:11px">&rarr;</span>'
+        +'<input type="time" value="'+f.e+'" data-fs-e="'+i+'" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:4px 6px;border-radius:6px;font-family:var(--mono);font-size:12px;width:90px">'
+        +'<button type="button" class="btn btn-danger btn-sm btn-icon" onclick="removeFsRow('+i+')"><i class="fa fa-xmark"></i></button>'
+        +'</div>';
+    }).join('');
   }
 
-  modal(`<div class="modal" style="max-width:520px">
+  const catOpts = CATS.map(c=>'<option'+(e&&e.cat===c?' selected':'')+'>'+c+'</option>').join('');
+  const n = e?e.name:'';
+  const vacDias = e&&e.vacDias?e.vacDias:30;
+  const hc = e?e.hc:9.25;
+  const mc = e?e.mc:1603;
+  const nick = e&&e.nick?e.nick:'';
+  const notes = e&&e.notes?e.notes:'';
+  const tel = e&&e.tel?e.tel:'';
+
+  modal(`<div class="modal" style="max-width:520px;max-height:90vh;overflow-y:auto">
     <div class="modal-header">
       <h3>${e?'Editar':'Nuevo'} empleado</h3>
       <button class="btn-close-modal" onclick="closeModal()"><i class="fa fa-xmark"></i></button>
     </div>
-    <div class="modal-body">
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:10px">
+
       <div class="form-row">
-        <div class="form-group"><label class="form-label">Nombre</label><input class="form-control" id="eN" value="${e?e.name:''}"></div>
-        <div class="form-group">
-          <label class="form-label">Jornada</label>
+        <div class="form-group"><label class="form-label">Nombre completo</label>
+          <input type="text" class="form-control" id="eN" value="${n}" required></div>
+        <div class="form-group"><label class="form-label">Alias (cuadrante)</label>
+          <input type="text" class="form-control" id="eNick" value="${nick}" placeholder="${e?n.split(' ')[0]:''}"></div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Teléfono</label>
+          <input type="tel" class="form-control" id="eTel" value="${tel}"></div>
+        <div class="form-group"><label class="form-label">Categoría</label>
+          <select class="form-control" id="eCat">${catOpts}</select></div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Jornada</label>
           <select class="form-control" id="eT" onchange="toggleFsSection(this.value)">
             <option value="full" ${!e||e.type==='full'?'selected':''}>40h — Jornada completa</option>
-            <option value="part" ${e&&e.type==='part'?'selected':''}>20h — Jornada parcial</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label class="form-label">€/hora</label><input type="number" class="form-control" id="eCH" value="${e?e.hc:9.25}" step="0.01"></div>
-        <div class="form-group"><label class="form-label">€/mes</label><input type="number" class="form-control" id="eCM" value="${e?e.mc:1603}"></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Estado</label>
+            <option value="part" ${e&&e.type==='part'?'selected':''}>20h — Media jornada</option>
+          </select></div>
+        <div class="form-group"><label class="form-label">Estado</label>
           <select class="form-control" id="eS">
             <option value="a" ${!e||(!e.sick&&e.active)?'selected':''}>✅ Activo</option>
             <option value="s" ${e&&e.sick>0?'selected':''}>🏥 Baja médica</option>
             <option value="i" ${e&&!e.active?'selected':''}>⛔ Inactivo</option>
-          </select>
-        </div>
-        <div class="form-group"><label class="form-label">Notas</label><input class="form-control" id="eObs" value="${e?e.notes||'':''}"></div>
+          </select></div>
       </div>
 
-      <!-- Sección días fijos (solo parciales) -->
-      <div id="fsSect" style="display:${isPart?'block':'none'};margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">€/hora bruto</label>
+          <input type="number" class="form-control" id="eCH" value="${hc}" step="0.01"></div>
+        <div class="form-group"><label class="form-label">€/mes bruto</label>
+          <input type="number" class="form-control" id="eCM" value="${mc}"></div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Días vacaciones/año</label>
+          <input type="number" class="form-control" id="eVacDias" value="${vacDias}" min="0" max="60"></div>
+        <div class="form-group"><label class="form-label">Notas</label>
+          <input class="form-control" id="eObs" value="${notes}" placeholder="Observaciones…"></div>
+      </div>
+
+      <!-- Días fijos para parciales -->
+      <div id="fsSect" style="display:${isPart?'block':'none'};border-top:1px solid var(--border);padding-top:10px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <label class="form-label" style="margin:0"><i class="fa fa-calendar-check" style="color:var(--accent)"></i> Días y horarios fijos</label>
+          <div>
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3)">Días y horarios fijos</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">Solo se planificará en estos días</div>
+          </div>
           <button type="button" class="btn btn-secondary btn-sm" onclick="addFsRow()"><i class="fa fa-plus"></i> Añadir día</button>
         </div>
         <div id="fsContainer">${fsRows(fs)}</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:6px">
-          <i class="fa fa-circle-info"></i> El autoplanificador asignará a este empleado solo en los días y turnos aquí definidos
-        </div>
       </div>
+
     </div>
     <div class="modal-footer">
-      ${e?`<button class="btn btn-danger btn-sm" onclick="if(confirm('¿Eliminar?')){DB.employees=DB.employees.filter(x=>x.id!==${e.id});save();closeModal();go('employees')}">Eliminar</button>`:''}
+      ${e?`<button class="btn btn-danger btn-sm" onclick="if(confirm('¿Eliminar a ${n}?')){DB.employees=DB.employees.filter(x=>x.id!==${e.id});save();audit('empleado_eliminado','${n}');closeModal();go('employees')}">Eliminar</button>`:''}
       <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-primary" onclick="saveEmp(${e?e.id:'null'})"><i class="fa fa-check"></i> Guardar</button>
     </div>
   </div>`);
-
-  // Guardar las slots actuales en variable temporal para manipulación
-  window._fsSlots=JSON.parse(JSON.stringify(fs));
 }
 
 function toggleFsSection(val){
@@ -1890,42 +2004,35 @@ function removeFsRow(i){
 function saveEmp(id){
   const n=$('eN').value.trim(); if(!n){alert('Introduce el nombre');return;}
   const type=$('eT').value, st=$('eS').value;
-  const hr=hrate();
-
-  // Recoger días fijos si es parcial
+  const hr=parseFloat($('eCH').value)||hrate();
   let fs=[];
   if(type==='part'){
     const dSelects=document.querySelectorAll('[data-fs-d]');
     dSelects.forEach((sel,i)=>{
-      const dow=parseInt(sel.value);
-      const sEl=document.querySelector(`[data-fs-s="${i}"]`);
-      const eEl=document.querySelector(`[data-fs-e="${i}"]`);
-      if(sEl&&eEl&&sEl.value&&eEl.value){
-        fs.push({d:dow, s:sEl.value, e:eEl.value});
-      }
+      const sEl=document.querySelector('[data-fs-s="'+i+'"]');
+      const eEl=document.querySelector('[data-fs-e="'+i+'"]');
+      if(sEl&&eEl&&sEl.value&&eEl.value) fs.push({d:parseInt(sel.value),s:sEl.value,e:eEl.value});
     });
   }
-
   const data={
-    name:n, type,
-    wh:type==='full'?40:20,
-    hc:parseFloat($('eCH').value)||hr,
+    name:n, nick:$('eNick').value.trim()||n.split(' ')[0],
+    type, wh:type==='full'?40:20, hc:hr,
     mc:parseInt($('eCM').value)||(type==='full'?Math.round(hr*40*52/12):Math.round(hr*20*52/12)),
-    sick:st==='s'?1:0,
-    active:st!=='i',
-    notes:$('eObs').value,
-    fs
+    sick:st==='s'?1:0, active:st!=='i',
+    cat:$('eCat').value, tel:$('eTel').value.trim(),
+    vacDias:parseInt($('eVacDias').value)||30,
+    notes:$('eObs').value.trim(),
+    fs, avatar:n[0].toUpperCase()
   };
-
   if(id&&id!==null){
-    Object.assign(DB.employees.find(x=>x.id===id), data);
-    audit('empleado_editado',`${n} — jornada: ${data.wh}h${fs.length?`, ${fs.length} días fijos`:''}`)
+    Object.assign(DB.employees.find(x=>x.id===id),data);
+    audit('empleado_editado',n+' — '+data.wh+'h');
   } else {
     data.id=maxId(DB.employees);
     DB.employees.push(data);
-    audit('empleado_creado',`${n} — jornada: ${data.wh}h`);
+    audit('empleado_creado',n+' — '+data.wh+'h');
   }
-  save(); flash(); closeModal(); go('employees');
+  save(); flash('✓ Empleado guardado'); closeModal(); go('employees');
 }
 
 // ─── SHIFTS ─────────────────────────────────────────────────
@@ -2356,944 +2463,9 @@ function calClick(ds){
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <span style="font-weight:600;font-size:13px"><i class="fa fa-chart-bar" style="color:var(--accent)"></i> Cobertura vs necesidades</span>
         <div style="display:flex;gap:8px;font-size:11px">
-          ${horasDeficit>0?`<span style="color:var(--red)">⚠ ${horasDeficit} franjas con déficit</span>`:`<span style="color:var(--green)">✓ Cobertura completa</span>`}
-        </div>
-      </div>
-      <div class="table-wrap"><table style="min-width:300px">
-        <thead><tr>
-          <th style="padding:3px 8px;font-size:11px">Franja</th>
-          <th style="text-align:center;padding:3px 6px;font-size:11px;color:var(--text3)">Necesario</th>
-          <th style="text-align:center;padding:3px 6px;font-size:11px;color:var(--accent)">Cubierto</th>
-          <th style="padding:3px 8px;font-size:11px">Cobertura</th>
-        </tr></thead>
-        <tbody>${coverageRows}</tbody>
-      </table></div>
-    </div>
-    `:''}
-  </div>`;
-}
-
-// Añadir vacaciones a un empleado para un día concreto desde el calendario
-function addVacDayMdl(ds){
-  const empOpts=DB.employees.filter(e=>e.active&&!e.sick).map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
-  modal(`<div class="modal" style="max-width:360px">
-    <div class="modal-header"><h3 class="modal-title"><i class="fa fa-umbrella-beach"></i> Asignar vacaciones</h3></div>
-    <div class="modal-body">
-      <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Día seleccionado: <strong>${dayN(ds)}, ${ds}</strong></p>
-      <label style="font-size:12px;color:var(--text3)">Empleado</label>
-      <select id="vacEmpSel" style="width:100%;margin:6px 0 12px;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px">${empOpts}</select>
-      <label style="font-size:12px;color:var(--text3)">Hasta (para asignar varios días seguidos)</label>
-      <input type="date" id="vacEndDate" value="${ds}" style="width:100%;margin:6px 0 0;padding:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;font-size:13px;box-sizing:border-box">
-    </div>
-    <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick="saveVacDay('${ds}')"><i class="fa fa-check"></i> Asignar</button>
-    </div>
-  </div>`);
-}
-
-function saveVacDay(startDs){
-  const empId=parseInt($('vacEmpSel').value);
-  const endDs=$('vacEndDate').value||startDs;
-  if(endDs<startDs){alert('La fecha de fin no puede ser anterior al inicio');return;}
-  // Evitar duplicados
-  const exists=DB.vacations.find(v=>v.employee_id===empId&&v.start===startDs&&v.end===endDs);
-  if(exists){closeModal();return;}
-  DB.vacations.push({id:maxId(DB.vacations),employee_id:empId,start:startDs,end:endDs,note:'Manual'});
-  save(); closeModal();
-  flash('✓ Vacaciones asignadas');
-  calClick(startDs);
-  go('schedule');
-}
-
-function delVacDay(vacId, ds){
-  if(!confirm('¿Quitar estas vacaciones?'))return;
-  DB.vacations=DB.vacations.filter(v=>v.id!==vacId);
-  save(); flash('✓ Vacaciones eliminadas'); calClick(ds); go('schedule');
-}
-
-// getStaffNeeds: devuelve la tabla de necesidades activa para una fecha dada
-// Busca en staffSeasons la temporada vigente; si no, usa staffNeeds (legacy) o STAFF_NEEDS_SEED
-function getStaffNeeds(ds){
-  const date = ds || today();
-  // Buscar temporada activa para esa fecha
-  if(DB.staffSeasons && DB.staffSeasons.length){
-    const season = DB.staffSeasons.find(s=>s.from<=date && s.to>=date);
-    if(season && season.needs && Object.keys(season.needs).length) return season.needs;
-    // Si no hay temporada exacta, usar la más reciente anterior
-    const past = DB.staffSeasons.filter(s=>s.from<=date).sort((a,b)=>b.from.localeCompare(a.from));
-    if(past.length) return past[0].needs;
-  }
-  // Legacy: DB.staffNeeds (objeto plano de versiones anteriores)
-  if(DB.staffNeeds && Object.keys(DB.staffNeeds).length) return DB.staffNeeds;
-  // Seed embebido
-  if(typeof STAFF_NEEDS_SEED !== 'undefined') return STAFF_NEEDS_SEED;
-  return {};
-}
-
-// staffForShift: personas necesarias en un turno para un día concreto
-function staffForShift(start, end, dow, ds){
-  const needs = getStaffNeeds(ds);
-  if(!Object.keys(needs).length) return 0;
-  const hStart = parseInt(start);
-  const hEnd = parseInt(end) || 0;
-  let max = 0;
-  for(let h = hStart; h !== hEnd; h = (h+1)%24){
-    const n = needs[String(h)] ? (needs[String(h)][String(dow)]||0) : 0;
-    if(n > max) max = n;
-    if(h === 23 && hEnd === 0) break;
-  }
-  return max;
-}
-function getPlanConfig(){
-  if(!DB.planConfig)DB.planConfig={
-    rules:{1:{c:4,n:4,p:2},2:{c:4,n:4,p:2},3:{c:5,n:8,p:5},4:{c:5,n:8,p:5},5:{c:4,n:6,p:4},6:{c:5,n:9,p:5},0:{c:6,n:7,p:6}},
-    shifts:{comida:{start:'10:00',end:'18:30'},cena:{start:'19:00',end:'01:30'},partido1:{start:'12:00',end:'16:00'},partido2:{start:'20:00',end:'00:30'}},
-    noCoincide:[[1,2]],encargados:[1,2],assignRules:[]
-  };
-  if(!DB.planConfig.assignRules) DB.planConfig.assignRules=[];
-  return DB.planConfig;
-}
-
-// Días de vacaciones según convenio hostelería Ceuta (art.12)
-// Jornada completa (40h): 30 días naturales
-// Jornada parcial (20h): proporcional = 15 días naturales
-function vacDaysForEmp(emp){
-  return emp.wh>=40 ? 30 : Math.round(30*(emp.wh/40));
-}
-
-// Días de vacaciones ya usados en el año para un empleado
-function vacUsed(empId, year){
-  return DB.vacations.filter(v=>v.employee_id===empId&&v.start.startsWith(year+'')).reduce((a,v)=>{
-    let d=new Date(v.start), end=new Date(v.end), n=0;
-    while(d<=end){n++;d.setDate(d.getDate()+1);}
-    return a+n;
-  },0);
-}
-
-// Días de vacaciones disponibles para un empleado en un año
-function vacAvailable(emp, year){
-  return Math.max(0, vacDaysForEmp(emp) - vacUsed(emp.id, year));
-}
-
-// Ajuste por histórico de ventas
-function planFactor(ds){
-  const d=new Date(ds);
-  const dow=d.getDay();
-  const lastYear=new Date(d); lastYear.setFullYear(lastYear.getFullYear()-1);
-  const diff=dow-lastYear.getDay();
-  lastYear.setDate(lastYear.getDate()+diff);
-  const lyDs=lastYear.toISOString().slice(0,10);
-  const lyV=salesOn(lyDs), thisV=salesOn(ds);
-  if(lyV>0&&thisV>0){
-    const r=thisV/lyV;
-    if(r>1.25)return 1;
-    if(r<0.75)return -1;
-  }
-  return 0;
-}
-
-// Empleados disponibles para un día: activos, sin baja, sin vacaciones ese día
-function availableEmps(ds){
-  const dow=new Date(ds).getDay();
-  const dsNorm=ds.slice(0,10);
-  // Excluir vacaciones EXCEPTO las rechazadas
-  // pending, approved, sin status = todas bloquean al planificador
-  // solo rejected no bloquea
-  const vacas=new Set(DB.vacations.filter(v=>{
-    if(v.status==='rejected') return false; // rechazadas: no bloquean
-    const vStart=(v.start||'').slice(0,10);
-    const vEnd=(v.end||'').slice(0,10);
-    return vStart<=dsNorm && vEnd>=dsNorm;
-  }).map(v=>v.employee_id));
-
-  return DB.employees.filter(e=>{
-    if(!e.active||e.sick>0)return false;
-    if(vacas.has(e.id))return false;
-    if(e.type==='part'&&e.fs&&e.fs.length){
-      if(!e.fs.some(f=>f.d===dow))return false;
-    }
-    return true;
-  });
-}
-
-// Horas trabajadas en el mes para un empleado (incluyendo turnos ya asignados)
-function hrsInMonth(empId, mStr){
-  return DB.shifts.filter(s=>s.date.startsWith(mStr)&&s.employee_id===empId)
-    .reduce((a,s)=>a+hrsOf(s.start,s.end),0);
-}
-
-function autoplanMonth(y, m){
-  const cfg=getPlanConfig();
-  const RULES=cfg.rules;
-  const ENCARGADOS=cfg.encargados||[];
-  const SH=cfg.shifts;
-  const mStr=`${y}-${String(m).padStart(2,'0')}`;
-  const days=new Date(y,m,0).getDate();
-  let added=0, warnings=[];
-
-  // CONVENIO HOSTELERIA CEUTA 2025-2029
-  // Art.9: descanso 12h entre jornadas, max 8h efectivas
-  // Art.10: max 5 dias/semana jornada completa (1.5 dias descanso semanal)
-  // Parciales: sus dias fijos en fs[] ya limitan los dias disponibles
-
-  function isoWeekMonday(ds){
-    const d=new Date(ds);
-    const day=d.getDay()||7;
-    const mon=new Date(d); mon.setDate(d.getDate()-day+1);
-    return mon.toISOString().slice(0,10);
-  }
-
-  function diasEnSemana(empId, wk){
-    return new Set(
-      DB.shifts.filter(s=>s.date.startsWith(mStr)&&s.employee_id===empId&&isoWeekMonday(s.date)===wk)
-        .map(s=>s.date)
-    ).size;
-  }
-
-  // BORRAR TODOS LOS TURNOS DEL MES — regeneración completa desde cero
-  // Esto garantiza que se respetan los descansos y las necesidades de personal
-  DB.shifts = DB.shifts.filter(s => !s.date.startsWith(mStr));
-
-  for(let d=1;d<=days;d++){
-    const ds=`${mStr}-${String(d).padStart(2,'0')}`;
-    const dow=new Date(ds).getDay();
-    const rule=RULES[dow];
-    const factor=planFactor(ds);
-
-    const wk=isoWeekMonday(ds);
-    const disponibles=availableEmps(ds).filter(e=>{
-      if(e.type==='part')return true;
-      return diasEnSemana(e.id,wk)<5;
-    });
-
-    if(disponibles.length===0){
-      warnings.push(`${ds}: sin disponibles`);
-      continue;
-    }
-
-    const hrsMap={};
-    disponibles.forEach(e=>{hrsMap[e.id]=hrsInMonth(e.id,mStr);});
-    const encDisp=disponibles.filter(e=>ENCARGADOS.includes(e.id));
-
-    const hasNeeds=Object.keys(getStaffNeeds(ds)).length>0;
-    let nP,nC,nN;
-    if(hasNeeds){
-      const nCo=staffForShift(SH.comida.start,SH.comida.end,dow,ds);
-      const nCe=staffForShift(SH.cena.start,SH.cena.end,dow,ds);
-      nP=Math.max(0,Math.min(nCo,nCe)+factor);
-      nC=Math.max(0,nCo-nP);
-      nN=Math.max(0,nCe-nP+factor);
-    }else{
-      nP=Math.max(0,rule.p+factor);
-      nC=Math.max(0,rule.c-rule.p);
-      nN=Math.max(0,rule.n-rule.p+factor);
-    }
-
-    const asignados=new Set();
-
-    function elegir(pool,n,tipo){
-      const shKey=tipo==='partido'?'partido1':tipo==='comida'?'comida':'cena';
-      const tS=SH[shKey]?SH[shKey].start:'10:00';
-      const tE=SH[shKey]?SH[shKey].end:'18:30';
-      const filt=applyAssignRules(pool,ds,tS,tE,asignados).filter(e=>!asignados.has(e.id));
-      filt.sort((a,b)=>(hrsMap[a.id]||0)-(hrsMap[b.id]||0));
-      if(tipo==='partido'){
-        const enc=filt.filter(e=>ENCARGADOS.includes(e.id));
-        const nenc=filt.filter(e=>!ENCARGADOS.includes(e.id));
-        const r=enc.length>0?[enc[0]]:[];
-        for(const e of nenc){if(r.length>=n)break;r.push(e);}
-        return r.slice(0,n);
-      }
-      const enc=filt.filter(e=>ENCARGADOS.includes(e.id)).slice(0,1);
-      const nenc=filt.filter(e=>!ENCARGADOS.includes(e.id));
-      const r=[...enc];
-      for(const e of nenc){if(r.length>=n)break;r.push(e);}
-      return r.slice(0,n);
-    }
-
-    const pPart=disponibles.filter(e=>e.fs&&e.fs.some(f=>f.d===dow&&f.s===SH.partido1.start));
-    const pCom=disponibles.filter(e=>e.fs&&e.fs.some(f=>f.d===dow&&f.s===SH.comida.start));
-    const pCena=disponibles.filter(e=>e.fs&&e.fs.some(f=>f.d===dow&&f.s===SH.cena.start));
-    const flex=disponibles.filter(e=>!e.fs||!e.fs.length);
-
-    const encP=[...encDisp].sort((a,b)=>(hrsMap[a.id]||0)-(hrsMap[b.id]||0)).slice(0,1);
-    const idsP=new Set([...pPart,...encP].map(e=>e.id));
-    const empP=elegir([...pPart,...encP,...flex.filter(e=>!idsP.has(e.id))],nP,'partido');
-    empP.forEach(emp=>{
-      const s1=SH.partido1.start,e1=SH.partido1.end,s2=SH.partido2.start,e2=SH.partido2.end;
-      DB.shifts.push({id:maxId(DB.shifts),employee_id:emp.id,date:ds,start:s1,end:e1,cost:parseFloat((hrsOf(s1,e1)*emp.hc).toFixed(2)),status:'auto',tipo:'partido-m'});
-      DB.shifts.push({id:maxId(DB.shifts),employee_id:emp.id,date:ds,start:s2,end:e2,cost:parseFloat((hrsOf(s2,e2)*emp.hc).toFixed(2)),status:'auto',tipo:'partido-t'});
-      asignados.add(emp.id);hrsMap[emp.id]=(hrsMap[emp.id]||0)+hrsOf(s1,e1)+hrsOf(s2,e2);added+=2;
-    });
-    if(empP.length<nP)warnings.push(`${ds} partido insuf: ${empP.length}/${nP}`);
-    warnings.push(...checkCoverageRule(ds,SH.partido1.start,asignados));
-
-    const encNoP=encDisp.filter(e=>!asignados.has(e.id));
-    const empC=elegir([...pCom.filter(e=>!asignados.has(e.id)),...encNoP,...flex.filter(e=>!asignados.has(e.id))],nC,'comida');
-    empC.forEach(emp=>{
-      const s=SH.comida.start,e=SH.comida.end;
-      DB.shifts.push({id:maxId(DB.shifts),employee_id:emp.id,date:ds,start:s,end:e,cost:parseFloat((hrsOf(s,e)*emp.hc).toFixed(2)),status:'auto',tipo:'comida'});
-      asignados.add(emp.id);hrsMap[emp.id]=(hrsMap[emp.id]||0)+hrsOf(s,e);added++;
-    });
-    if(empC.length<nC)warnings.push(`${ds} comida insuf: ${empC.length}/${nC}`);
-
-    const encNoC=encDisp.filter(e=>!asignados.has(e.id));
-    const empN=elegir([...pCena.filter(e=>!asignados.has(e.id)),...encNoC,...flex.filter(e=>!asignados.has(e.id))],nN,'cena');
-    empN.forEach(emp=>{
-      const s=SH.cena.start,e=SH.cena.end;
-      DB.shifts.push({id:maxId(DB.shifts),employee_id:emp.id,date:ds,start:s,end:e,cost:parseFloat((hrsOf(s,e)*emp.hc).toFixed(2)),status:'auto',tipo:'cena'});
-      asignados.add(emp.id);hrsMap[emp.id]=(hrsMap[emp.id]||0)+hrsOf(s,e);added++;
-    });
-    if(empN.length<nN)warnings.push(`${ds} cena insuf: ${empN.length}/${nN}`);
-  }
-
-  // Generar alertas visibles para días con déficit de cobertura
-  const needs = getStaffNeeds(`${mStr}-01`);
-  if(Object.keys(needs).length){
-    // Eliminar alertas previas de cobertura de este mes
-    DB.alerts = DB.alerts.filter(a=>!(a._sk&&a._sk.startsWith(`cov_${mStr}`)));
-    const mLabel=new Date(y,m-1,1).toLocaleString('es-ES',{month:'long',year:'numeric'});
-    const deficitDays=[];
-    for(let d=1;d<=days;d++){
-      const ds=`${mStr}-${String(d).padStart(2,'0')}`;
-      const dow=new Date(ds).getDay();
-      const shifts=DB.shifts.filter(s=>s.date===ds);
-      if(!shifts.length) continue;
-      function covAt(h){
-        return shifts.filter(s=>{
-          const sh=parseInt(s.start), eh=parseInt(s.end)||0;
-          if(eh===0||eh<sh) return h>=sh||h<eh;
-          return h>=sh&&h<eh;
-        }).length;
-      }
-      const HOURS=[10,11,12,13,14,15,16,17,18,19,20,21,22,23,0];
-      let maxDeficit=0, worstHour='';
-      HOURS.forEach(h=>{
-        const need=parseInt(needs[String(h)]?.[String(dow)]||0);
-        const cov=covAt(h);
-        const def=need-cov;
-        if(def>maxDeficit){maxDeficit=def;worstHour=`${String(h).padStart(2,'0')}:00`;}
-      });
-      if(maxDeficit>0) deficitDays.push({ds,dow,maxDeficit,worstHour});
-    }
-    if(deficitDays.length>0){
-      const detail=deficitDays.slice(0,5).map(d=>
-        `${new Date(d.ds).toLocaleDateString('es-ES',{weekday:'short',day:'numeric'})}: faltan ${d.maxDeficit}p a las ${d.worstHour}`
-      ).join(' · ')+(deficitDays.length>5?` · +${deficitDays.length-5} más`:'');
-      DB.alerts.push({
-        id:maxId(DB.alerts),
-        sev:'warning',
-        msg:`Cobertura insuficiente en ${deficitDays.length} día${deficitDays.length>1?'s':''} de ${mLabel}`,
-        soluciones:[
-          detail,
-          'Revisa el cuadrante — pincha cada día para ver la cobertura hora a hora',
-          deficitDays.length>3?'Considera añadir refuerzo o ajustar los turnos manualmente':
-            'Puedes añadir turno manual en los días afectados desde el cuadrante'
-        ],
-        mStr, done:false,
-        _sk:`cov_${mStr}_${Date.now()}`,
-        ts:new Date().toLocaleDateString('es-ES')
-      });
-    }
-  }
-
-  save();
-  audit('autoplan',`Planificación ${y}-${String(m).padStart(2,'0')}: ${added} turnos`);
-  const wt=warnings.length;
-  flash(`✓ ${added} turnos generados${wt>0?` · ⚠ ${wt} avisos`:''}`);
-  if(wt>0)console.warn('Avisos:',warnings);
-  go('schedule');
-}
-
-function vacResumenMdl(){
-  const year=new Date().getFullYear();
-  const rows=DB.employees.filter(e=>e.active).map(e=>{
-    const total=vacDaysForEmp(e);
-    const used=vacUsed(e.id,year);
-    const left=Math.max(0,total-used);
-    const pct=Math.round(used/total*100);
-    return`<tr>
-      <td class="td-bold">${e.name}</td>
-      <td style="text-align:center">${e.wh}h</td>
-      <td style="text-align:center">${total}d</td>
-      <td style="text-align:center;color:var(--amber)">${used}d</td>
-      <td style="text-align:center;color:${left<5?'var(--red)':'var(--teal)'}">${left}d</td>
-      <td style="min-width:80px"><div style="background:var(--bg3);border-radius:4px;height:6px"><div style="background:${pct>80?'var(--red)':'var(--accent)'};width:${Math.min(100,pct)}%;height:6px;border-radius:4px"></div></div></td>
-    </tr>`;
-  }).join('');
-  modal(`<div class="modal" style="max-width:620px">
-    <div class="modal-header"><h3 class="modal-title"><i class="fa fa-umbrella-beach"></i> Vacaciones ${year}</h3></div>
-    <div class="modal-body">
-      <p style="font-size:12px;color:var(--text3);margin-bottom:12px">Según Convenio Hostelería Ceuta 2025-2029: 30 días naturales jornada completa, proporcional para parciales.</p>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Empleado</th><th style="text-align:center">Jornada</th><th style="text-align:center">Total</th><th style="text-align:center">Usados</th><th style="text-align:center">Quedan</th><th>Consumo</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>
-    </div>
-    <div class="modal-footer" style="display:flex;justify-content:flex-end">
-      <button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
-    </div>
-  </div>`);
-}
-
-function autoplanMdl(){
-  const now=new Date();
-  const y=parseInt(_store.getItem('cal_y')||now.getFullYear());
-  const m=parseInt(_store.getItem('cal_m')||now.getMonth()+1);
-  const mName=new Date(y,m-1,1).toLocaleString('es-ES',{month:'long',year:'numeric'});
-  const mStr=`${y}-${String(m).padStart(2,'0')}`;
-  const existing=DB.shifts.filter(s=>s.date.startsWith(mStr));
-  modal(`<div class="modal" style="max-width:500px">
-    <div class="modal-header"><h3 class="modal-title"><i class="fa fa-wand-magic-sparkles"></i> Autoplanificar — ${mName}</h3></div>
-    <div class="modal-body">
-      <div style="background:var(--bg3);border-radius:8px;padding:12px;font-size:12px;color:var(--text2);margin-bottom:12px">
-        <div style="display:grid;grid-template-columns:auto 1fr 1fr 1fr;gap:5px 16px;align-items:center">
-          <strong style="color:var(--text)">Día</strong><strong style="color:var(--text)">Partido (12-16/20-00:30)</strong><strong style="color:var(--text)">Solo comida</strong><strong style="color:var(--text)">Solo cena</strong>
-          <span>Lun/Mar</span><span>2</span><span>2</span><span>2</span>
-          <span>Mié/Jue</span><span>5</span><span>—</span><span>3</span>
-          <span>Viernes</span><span>4</span><span>—</span><span>2</span>
-          <span>Sábado</span><span>5</span><span>—</span><span>4</span>
-          <span>Domingo</span><span>6</span><span>—</span><span>1</span>
-        </div>
-      </div>
-      <div style="font-size:12px;color:var(--text3);margin-bottom:10px;display:flex;flex-direction:column;gap:4px">
-        <span><i class="fa fa-clock" style="color:var(--accent)"></i> Turno continuo: 8,5h (8h efectivas + 30min descanso)</span>
-        <span><i class="fa fa-chart-line" style="color:var(--teal)"></i> Histórico ajusta ±1 persona si ventas difieren >25%</span>
-        <span><i class="fa fa-umbrella-beach" style="color:var(--amber)"></i> Respeta vacaciones y bajas asignadas</span>
-        <span><i class="fa fa-scale-balanced" style="color:var(--purple)"></i> Reparte horas equitativamente según contrato</span>
-      </div>
-      ${existing.length>0?`<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--red);margin-bottom:10px">
-        <i class="fa fa-triangle-exclamation"></i> Hay <strong>${existing.length} turnos</strong> este mes. Se <strong>borrarán todos</strong> y se regenerarán desde cero respetando el convenio.
-      </div>`:''}
-    </div>
-    <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
-      <button class="btn btn-secondary btn-sm" onclick="closeModal();vacResumenMdl()"><i class="fa fa-umbrella-beach"></i> Ver vacaciones</button>
-      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick="closeModal();autoplanMonth(${y},${m})">
-        <i class="fa fa-wand-magic-sparkles"></i> Generar cuadrante desde cero
-      </button>
-    </div>
-  </div>`);
-}
-// ─────────────────────────────────────────────────────────────
-
-
-function updateShift(id,field,value){
-  const s=DB.shifts.find(x=>x.id===id);if(!s)return;
-  const oldVal=s[field];
-  s[field]=field==='employee_id'?parseInt(value):value;
-  const emp=DB.employees.find(x=>x.id===s.employee_id);
-  if(emp)s.cost=parseFloat((hrsOf(s.start,s.end)*emp.hc).toFixed(2));
-  const fieldLabel={employee_id:'empleado',start:'entrada',end:'salida'}[field]||field;
-  audit('turno_modificado',`${s.date}: ${fieldLabel} cambiado → ${field==='employee_id'?(emp?emp.name:value):value}`);
-  save();
-  // Refresh cost display without full re-render
-  const ds=s.date;
-  const ds2=DB.shifts.filter(x=>x.date===ds);
-  const totalCostEl=document.querySelector(`[data-day-cost="${ds}"]`);
-  if(totalCostEl)totalCostEl.textContent=eur(ds2.reduce((a,x)=>a+(x.cost||0),0));
-}
-
-function deleteShift(id,ds){
-  const s=DB.shifts.find(x=>x.id===id);
-  const emp=s?DB.employees.find(e=>e.id===s.employee_id):null;
-  DB.shifts=DB.shifts.filter(x=>x.id!==id);
-  audit('turno_eliminado',`${emp?emp.name:'?'} — ${s?s.date:''} ${s?s.start:''}-${s?s.end:''}`);
-  save();
-  calClick(ds);
-  go('schedule');
-}
-
-function applyTplMdl(y,m){
-  const mName=new Date(y,m-1,1).toLocaleString('es-ES',{month:'long',year:'numeric'});
-  const mStr=`${y}-${String(m).padStart(2,'0')}`;
-  const existing=DB.shifts.filter(s=>s.date.startsWith(mStr)).length;
-  modal(`<div class="modal"><div class="modal-header"><h3>Aplicar plantilla — ${mName}</h3><button class="btn-close-modal" onclick="closeModal()"><i class="fa fa-xmark"></i></button></div>
-    <div class="modal-body">
-      <div class="alert-item info" style="margin-bottom:12px;padding:8px 12px"><i class="fa fa-circle-info alert-icon"></i><div style="font-size:12px">Esto generará turnos para todos los empleados según su plantilla semanal. Los turnos ya existentes <b>no se sobreescriben</b>.</div></div>
-      ${existing?`<div class="alert-item warning" style="padding:8px 12px"><i class="fa fa-triangle-exclamation alert-icon"></i><div style="font-size:12px">Ya hay <b>${existing} turnos</b> en este mes. Solo se añadirán los que falten.</div></div>`:''}
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick="const n=applyTemplateToMonth(${y},${m});save();flash(n+' turnos añadidos');closeModal();go('schedule')">
-        <i class="fa fa-wand-magic-sparkles"></i> Aplicar plantilla
-      </button>
-    </div>
-  </div>`);
-}
-
-function applyTemplateDayMdl(ds){
-  const dow=new Date(ds).getDay();
-  const empWithSlots=DB.employees.filter(e=>e.active&&!e.sick&&e.fs&&e.fs.some(f=>f.d===dow));
-  if(!empWithSlots.length){alert('Ningún empleado tiene plantilla para '+dayN(ds)+'. Edita la plantilla semanal primero.');return;}
-  let added=0;
-  empWithSlots.forEach(emp=>{
-    emp.fs.filter(f=>f.d===dow).forEach(f=>{
-      if(DB.shifts.some(s=>s.employee_id===emp.id&&s.date===ds&&s.start===f.s))return;
-      const cost=parseFloat((hrsOf(f.s,f.e)*emp.hc).toFixed(2));
-      DB.shifts.push({id:maxId(DB.shifts),employee_id:emp.id,date:ds,start:f.s,end:f.e,cost,status:'template'});
-      added++;
-    });
-  });
-  save();flash(added+' turnos añadidos desde plantilla');calClick(ds);go('schedule');
-}
-
-// ── Editor de plantilla semanal ─────────────────────────────
-function editTemplateMdl(){
-  const DAYS=[{d:1,n:'Lunes'},{d:2,n:'Martes'},{d:3,n:'Miércoles'},{d:4,n:'Jueves'},{d:5,n:'Viernes'},{d:6,n:'Sábado'},{d:0,n:'Domingo'}];
-  const activeEmps=DB.employees.filter(e=>e.active&&!e.sick);
-
-  const rows=activeEmps.map(emp=>{
-    const slots=emp.fs||[];
-    const cells=DAYS.map(({d,n})=>{
-      const daySlots=slots.filter(f=>f.d===d);
-      return`<td style="padding:4px;vertical-align:top;min-width:110px">
-        ${daySlots.map((f,fi)=>`<div style="display:flex;gap:3px;align-items:center;margin-bottom:3px">
-          <input type="time" value="${f.s}" style="width:70px;background:var(--bg3);border:1px solid var(--border2);color:var(--teal);padding:2px 4px;border-radius:3px;font-size:11px;font-family:var(--mono)" id="tpl_s_${emp.id}_${d}_${fi}">
-          <span style="color:var(--text3);font-size:10px">–</span>
-          <input type="time" value="${f.e}" style="width:70px;background:var(--bg3);border:1px solid var(--border2);color:var(--teal);padding:2px 4px;border-radius:3px;font-size:11px;font-family:var(--mono)" id="tpl_e_${emp.id}_${d}_${fi}">
-          <button onclick="removeTplSlot(${emp.id},${d},${fi})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:11px;padding:1px 3px">✕</button>
-        </div>`).join('')}
-        <button onclick="addTplSlot(${emp.id},${d})" style="background:rgba(79,124,255,.12);border:1px solid rgba(79,124,255,.2);color:var(--accent);cursor:pointer;border-radius:3px;font-size:10px;padding:2px 6px;width:100%">+ turno</button>
-      </td>`;
-    }).join('');
-    return`<tr><td style="padding:6px 10px;font-weight:500;white-space:nowrap;font-size:12px;background:var(--bg3);position:sticky;left:0">${emp.name.split(' ')[0]}</td>${cells}</tr>`;
-  }).join('');
-
-  modal(`<div class="modal" style="width:95vw;max-width:1100px"><div class="modal-header"><h3>Plantilla de turnos semanal</h3><button class="btn-close-modal" onclick="closeModal()"><i class="fa fa-xmark"></i></button></div>
-    <div class="modal-body" style="padding:12px;overflow-x:auto">
-      <div class="alert-item info" style="margin-bottom:10px;padding:6px 10px"><i class="fa fa-circle-info alert-icon"></i><div style="font-size:11px">Define los turnos habituales por empleado y día. Luego usa <b>"Aplicar plantilla"</b> en el cuadrante para rellenar un mes completo automáticamente.</div></div>
-      <table style="border-collapse:collapse;width:100%">
-        <thead><tr>
-          <th style="padding:6px 10px;background:var(--bg3);font-size:11px;text-align:left;position:sticky;left:0">Empleado</th>
-          ${DAYS.map(({n})=>`<th style="padding:6px 8px;background:var(--bg3);font-size:11px;min-width:110px">${n}</th>`).join('')}
-        </tr></thead>
-        <tbody id="tplBody">${rows}</tbody>
-      </table>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick="saveTemplate()"><i class="fa fa-check"></i> Guardar plantilla</button>
-    </div>
-  </div>`);
-}
-
-function addTplSlot(empId,d){
-  const emp=DB.employees.find(x=>x.id===empId);if(!emp)return;
-  if(!emp.fs)emp.fs=[];
-  emp.fs.push({d,s:'10:00',e:'18:00'});
-  save();closeModal();editTemplateMdl();
-}
-function removeTplSlot(empId,d,fi){
-  const emp=DB.employees.find(x=>x.id===empId);if(!emp||!emp.fs)return;
-  let ci=0;
-  emp.fs=emp.fs.filter(f=>{if(f.d!==d)return true;return ci++!==fi;});
-  save();closeModal();editTemplateMdl();
-}
-function saveTemplate(){
-  const DAYS=[0,1,2,3,4,5,6];
-  DB.employees.filter(e=>e.active).forEach(emp=>{
-    if(!emp.fs)emp.fs=[];
-    const newFs=[];
-    DAYS.forEach(d=>{
-      let fi=0;
-      while(true){
-        const sEl=document.getElementById(`tpl_s_${emp.id}_${d}_${fi}`);
-        const eEl=document.getElementById(`tpl_e_${emp.id}_${d}_${fi}`);
-        if(!sEl||!eEl)break;
-        newFs.push({d,s:sEl.value,e:eEl.value});
-        fi++;
-      }
-    });
-    emp.fs=newFs;
-  });
-  save();flash('Plantilla guardada');closeModal();go('schedule');
-}
-
-// ─── VACATIONS ──────────────────────────────────────────────
-function pgVacations(){
-  const vacs=DB.vacations.slice().sort((a,b)=>b.start.localeCompare(a.start));
-  const pending=vacs.filter(v=>v.status==='pending').length;
-  const rows=vacs.length?vacs.map(v=>{
-    const e=DB.employees.find(x=>x.id===v.employee_id);
-    const days=v.days||Math.round((new Date(v.end)-new Date(v.start))/86400000)+1;
-    const st=v.status||'approved'; // sin status = aprobada (manual desde calendario)
-    const badge=st==='approved'?'<span class="badge badge-green">✓ Aprobada</span>':
-                 st==='rejected'?'<span class="badge badge-red">✗ Rechazada</span>':
-                 '<span class="badge badge-amber">⏳ Pendiente</span>';
-    const actions=`
-      ${st==='pending'?`
-        <button class="btn btn-primary btn-sm" onclick="approveVac(${v.id})"><i class="fa fa-check"></i> Aprobar</button>
-        <button class="btn btn-danger btn-sm" onclick="rejectVac(${v.id})"><i class="fa fa-xmark"></i> Rechazar</button>
-      `:''}
-      ${st==='approved'?`<button class="btn btn-secondary btn-sm btn-icon" onclick="rejectVac(${v.id})" title="Revocar aprobación"><i class="fa fa-rotate-left"></i></button>`:''}
-      ${st==='rejected'?`<button class="btn btn-secondary btn-sm btn-icon" onclick="approveVac(${v.id})" title="Aprobar"><i class="fa fa-check"></i></button>`:''}
-      <button class="btn btn-danger btn-sm btn-icon" onclick="if(confirm('¿Eliminar?')){DB.vacations=DB.vacations.filter(x=>x.id!==${v.id});save();go('vacations')}"><i class="fa fa-trash"></i></button>
-    `;
-    return`<tr>
-      <td class="td-bold">${e?e.name:'?'}</td>
-      <td>${v.start}</td><td>${v.end}</td>
-      <td class="td-mono">${days}d</td>
-      <td>${badge}</td>
-      <td><div style="display:flex;gap:4px;flex-wrap:wrap">${actions}</div></td>
-    </tr>`;
-  }).join(''):`<tr><td colspan="6" style="text-align:center;color:var(--text3)">Sin solicitudes de vacaciones</td></tr>`;
-
-  return`<div class="page-header">
-    <div><h2>Vacaciones y ausencias</h2><p>${vacs.length} registros · ${pending} pendientes de aprobar</p></div>
-    <div class="page-actions">
-      ${pending>0?`<button class="btn btn-primary btn-sm" onclick="approveAllVac()"><i class="fa fa-check-double"></i> Aprobar todas</button>`:''}
-      <button class="btn btn-primary btn-sm" onclick="vacMdl()"><i class="fa fa-plus"></i> Nueva</button>
-    </div>
-  </div>
-  <div class="page-body">
-    ${pending>0?`<div class="alert-item warning" style="margin-bottom:12px">
-      <i class="fa fa-triangle-exclamation alert-icon"></i>
-      <div><div class="alert-msg">${pending} vacaciones pendientes de aprobar</div>
-      <div class="alert-meta">El cuadrante automático solo respeta las vacaciones <strong>aprobadas</strong>. Aprueba las solicitudes antes de generar el cuadrante.</div></div>
-    </div>`:''}
-    <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>Empleado</th><th>Desde</th><th>Hasta</th><th>Días</th><th>Estado</th><th>Acciones</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div></div>
-  </div>`;
-}
-
-function approveVac(id){
-  const v=DB.vacations.find(x=>x.id===id);
-  if(v){v.status='approved';save();audit('vac_aprobada',`Vacaciones aprobadas: ${DB.employees.find(e=>e.id===v.employee_id)?.name} ${v.start}→${v.end}`);}
-  go('vacations');
-}
-function rejectVac(id){
-  const v=DB.vacations.find(x=>x.id===id);
-  if(v){v.status='rejected';save();audit('vac_rechazada',`Vacaciones rechazadas: ${DB.employees.find(e=>e.id===v.employee_id)?.name} ${v.start}→${v.end}`);}
-  go('vacations');
-}
-function approveAllVac(){
-  if(!confirm(`¿Aprobar todas las vacaciones pendientes?`))return;
-  DB.vacations.filter(v=>v.status==='pending').forEach(v=>v.status='approved');
-  save();flash('✓ Todas aprobadas');go('vacations');
-}
-function vacMdl(){
-  modal(`<div class="modal">
-    <div class="modal-header"><h3>Nueva solicitud</h3><button class="btn-close-modal" onclick="closeModal()"><i class="fa fa-xmark"></i></button></div>
-    <div class="modal-body">
-      <div class="form-group"><label class="form-label">Empleado</label><select class="form-control" id="vE">${DB.employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('')}</select></div>
-      <div class="form-row"><div class="form-group"><label class="form-label">Desde</label><input type="date" class="form-control" id="vS"></div><div class="form-group"><label class="form-label">Hasta</label><input type="date" class="form-control" id="vE2"></div></div>
-    </div>
-    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="saveVac()">Guardar</button></div>
-  </div>`);
-}
-function saveVac(){
-  const s=$('vS').value,e=$('vE2').value; if(!s||!e){alert('Introduce fechas');return;}
-  DB.vacations.push({id:maxId(DB.vacations),employee_id:parseInt($('vE').value),start:s,end:e,days:Math.round((new Date(e)-new Date(s))/86400000)+1,status:'pending'});
-  save();flash();closeModal();go('vacations');
-}
-
-// ─── SALES ──────────────────────────────────────────────────
-function pgSales(){
-  const t=today();
-  // Build 30-day window
-  const days=[];
-  for(let i=29;i>=0;i--){const d=new Date(t);d.setDate(d.getDate()-i);const ds=d.toISOString().split('T')[0];const real=salesOn(ds);days.push({ds,s:real||estSales(ds),real:real>0});}
-  const realDays=days.filter(x=>x.real),estDays=days.filter(x=>!x.real);
-  const totalReal=realDays.reduce((a,x)=>a+x.s,0);
-  const avg=days.reduce((a,x)=>a+x.s,0)/30;
-  const best=days.reduce((b,x)=>x.s>b.s?x:b);
-  // Weekly grouping
-  const weeks={};days.forEach(x=>{const d=new Date(x.ds);const yw=`${d.getFullYear()}-W${String(Math.ceil((d.getDate()+new Date(d.getFullYear(),d.getMonth(),1).getDay())/7)).padStart(2,'0')}`;if(!weeks[yw])weeks[yw]={label:yw.slice(-3),total:0,days:[]};weeks[yw].total+=x.s;weeks[yw].days.push(x);});
-  return`<div class="page-header"><div><h2>Ventas</h2><p>Últimos 30 días · <span style="color:var(--green)">● real</span> <span style="color:var(--text3)">● estimado</span></p></div><div class="page-actions"><button class="btn btn-primary btn-sm" onclick="go('importer')"><i class="fa fa-file-import"></i> Importar</button></div></div>
-  <div class="page-body">
-    <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
-      <div class="kpi-card accent"><div class="kpi-label">Total 30 días</div><div class="kpi-value" style="font-size:18px">${eur(Math.round(days.reduce((a,x)=>a+x.s,0)))}</div></div>
-      <div class="kpi-card green"><div class="kpi-label">Ventas reales</div><div class="kpi-value" style="font-size:18px;color:var(--green)">${eur(Math.round(totalReal))}</div><div class="kpi-sub">${realDays.length} días importados</div></div>
-      <div class="kpi-card"><div class="kpi-label">Media diaria</div><div class="kpi-value" style="font-size:18px">${eur(Math.round(avg))}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Mejor día</div><div class="kpi-value" style="font-size:18px;color:var(--green)">${dayN(best.ds).slice(0,3)} ${best.ds.slice(5)}</div><div class="kpi-sub">${eur(Math.round(best.s))}</div></div>
-    </div>
-    <div class="card" style="margin-top:16px"><div class="card-header"><span class="card-title">Ventas diarias — 30 días</span><span style="font-size:11px;color:var(--text3)">Verde=real · Azul=estimado</span></div><div class="chart-wrap" style="height:220px"><canvas id="c_sales"></canvas></div></div>
-    <div class="card" style="margin-top:16px"><div class="card-header"><span class="card-title">Detalle por día</span></div><div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Día</th><th>Ventas</th><th>Tipo</th><th>vs media</th></tr></thead>
-    <tbody>${days.slice().reverse().map(x=>{const vs=avg>0?(x.s-avg)/avg*100:0;return`<tr><td style="color:var(--text3)">${x.ds}</td><td class="td-bold">${dayN(x.ds)}</td><td class="td-mono" style="color:var(--${x.real?'green':'text2'})">${eur(Math.round(x.s))}</td><td>${x.real?'<span class="badge badge-green">Real</span>':'<span class="badge badge-gray">Estimado</span>'}</td><td><span class="badge badge-${vs>=5?'green':vs<=-5?'red':'gray'}">${vs>=0?'+':''}${vs.toFixed(1)}%</span></td></tr>`;}).join('')}</tbody>
-    </table></div></div>
-  </div>`;
-}
-function afSales(){
-  const t=today(),labels=[],sv=[],colors=[];
-  for(let i=29;i>=0;i--){const d=new Date(t);d.setDate(d.getDate()-i);const ds=d.toISOString().split('T')[0];const real=salesOn(ds);labels.push(i%5===0?sDay(ds)+' '+ds.slice(5):'');sv.push(Math.round(real||estSales(ds)));colors.push(real>0?'rgba(34,197,94,0.65)':'rgba(79,124,255,0.4)');}
-  const el=$('c_sales');
-  if(el)new Chart(el,{type:'bar',data:{labels,datasets:[{data:sv,backgroundColor:colors,borderRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#565c7a',font:{size:9}}},y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#565c7a',callback:v=>'€'+v}}}}});
-}
-
-// ─── PROFIT ─────────────────────────────────────────────────
-function dynFixedDay(){
-  const total=DB.fixedCosts.filter(c=>c.active).reduce((a,c)=>a+c.amount,0);
-  return Math.round(total/26);
-}
-function pgProfit(){
-  const t=today(),days=[];
-  const fd=dynFixedDay();
-  for(let i=13;i>=0;i--){
-    const d=new Date(t);d.setDate(d.getDate()-i);const ds=d.toISOString().split('T')[0];
-    const jd=WEEKLY_LABOR[ds],sal=salesOn(ds)||estSales(ds);
-    const lab=jd?jd.cost:laborOn(ds),mmp=Math.round(sal*RATIO_MMPP);
-    const ebt=Math.round(sal-mmp-lab-fd);
-    days.push({ds,day:sDay(ds),sal:Math.round(sal),mmp,lab:Math.round(lab),fix:fd,ebt,lp:sal>0?Math.round(lab/sal*1000)/10:0,mp:sal>0?Math.round(ebt/sal*1000)/10:0,real:!!salesOn(ds)});
-  }
-  const wS=days.reduce((a,x)=>a+x.sal,0),wM=days.reduce((a,x)=>a+x.mmp,0);
-  const wL=days.reduce((a,x)=>a+x.lab,0),wF=days.reduce((a,x)=>a+x.fix,0);
-  const wE=days.reduce((a,x)=>a+x.ebt,0);
-  const wLP=wS>0?Math.round(wL/wS*1000)/10:0,wMP=wS>0?Math.round(wE/wS*1000)/10:0;
-  const fixedTotal=DB.fixedCosts.filter(c=>c.active).reduce((a,c)=>a+c.amount,0);
-  return`<div class="page-header"><div><h2>Beneficio diario</h2>
-    <p>Últimos 14 días · MMPP ${Math.round(RATIO_MMPP*100)}% · Fijos ${eur(fd)}/día (${eur(Math.round(fixedTotal))}/mes) · <span style="color:var(--green)">● real</span> <span style="color:var(--text3)">● estimado</span></p></div></div>
-  <div class="page-body">
-    <div class="kpi-grid" style="grid-template-columns:repeat(6,1fr)">
-      <div class="kpi-card green"><div class="kpi-label">Ventas</div><div class="kpi-value" style="font-size:18px;color:var(--green)">${eur(wS)}</div></div>
-      <div class="kpi-card"><div class="kpi-label">MMPP</div><div class="kpi-value" style="font-size:18px;color:var(--teal)">-${eur(wM)}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Margen bruto</div><div class="kpi-value" style="font-size:18px;color:var(--teal)">${eur(wS-wM)}</div><div class="kpi-sub">${wS>0?Math.round((wS-wM)/wS*100):0}%</div></div>
-      <div class="kpi-card amber"><div class="kpi-label">Personal</div><div class="kpi-value" style="font-size:18px;color:var(--amber)">-${eur(wL)}</div><div class="kpi-sub">${wLP}%</div></div>
-      <div class="kpi-card"><div class="kpi-label">Fijos</div><div class="kpi-value" style="font-size:18px">-${eur(wF)}</div></div>
-      <div class="kpi-card ${wE>=0?'green':'red'}"><div class="kpi-label">EBITDA</div><div class="kpi-value" style="font-size:18px;color:var(--${wE>=0?'green':'red'})">${wE>=0?'+':''}${eur(wE)}</div><div class="kpi-sub">${wMP}%</div></div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:16px">
-      ${days.slice(-7).map(x=>`<div class="card card-sm" style="border-top:3px solid var(--${x.ebt>300?'green':x.ebt>0?'accent':'red'})">
-        <div style="font-size:11px;font-weight:600;color:var(--text2)">${x.day}${x.real?' <span style="color:var(--green)">●</span>':' <span style="color:var(--text3)">●</span>'}</div>
-        <div style="font-size:10px;color:var(--text3);margin-bottom:4px">${x.ds.slice(5)}</div>
-        <div style="font-size:13px;font-weight:600;font-family:var(--mono);color:var(--${x.real?'green':'text2'})">${eur(x.sal)}</div>
-        <div style="font-size:10px;color:var(--teal)">-${eur(x.mmp)} MMPP</div>
-        <div style="font-size:11px;font-weight:600;font-family:var(--mono);color:var(--teal)">${eur(x.sal-x.mmp)}</div>
-        <div style="font-size:9px;color:var(--teal);margin-bottom:3px">Margen bruto</div>
-        <div style="border-top:1px solid var(--border);margin:3px 0"></div>
-        <div style="font-size:10px;color:var(--amber)">-${eur(x.lab)} pers.</div>
-        <div style="font-size:10px;color:var(--text2)">-${eur(x.fix)} fijos</div>
-        <div style="border-top:2px solid var(--border);margin-top:4px;padding-top:4px">
-          <div style="font-size:13px;font-weight:700;font-family:var(--mono);color:var(--${x.ebt>=0?'green':'red'})">${x.ebt>=0?'+':''}${eur(x.ebt)}</div>
-          <div style="font-size:9px;color:var(--${x.mp>=12?'green':x.mp>=5?'amber':'red'})">${x.mp}% EBITDA</div>
-        </div>
-      </div>`).join('')}
-    </div>
-    <div class="card" style="margin-top:16px"><div class="card-header"><span class="card-title">Desglose 14 días</span></div>
-      <div class="table-wrap"><table><thead><tr><th>Día</th><th style="text-align:right">Ventas</th><th style="text-align:right">MMPP</th><th style="text-align:right">Mg.Bruto</th><th style="text-align:right">Personal</th><th style="text-align:right">%lab</th><th style="text-align:right">Fijos</th><th style="text-align:right">EBITDA</th></tr></thead>
-        <tbody>
-          ${days.map(x=>`<tr><td class="td-bold">${x.day} ${x.ds.slice(5)}${x.real?' <span style="color:var(--green);font-size:10px">●</span>':' <span style="color:var(--text3);font-size:10px">~</span>'}</td><td class="td-mono" style="text-align:right;color:var(--${x.real?'green':'text2'})">${eur(x.sal)}</td><td class="td-mono" style="text-align:right;color:var(--teal)">-${eur(x.mmp)}</td><td class="td-mono" style="text-align:right;color:var(--teal);font-weight:600">${eur(x.sal-x.mmp)}</td><td class="td-mono" style="text-align:right;color:var(--amber)">-${eur(x.lab)}</td><td style="text-align:right"><span class="badge badge-${x.lp<=30?'green':x.lp<=36?'amber':'red'}">${x.lp}%</span></td><td class="td-mono" style="text-align:right">-${eur(x.fix)}</td><td class="td-mono" style="text-align:right;font-weight:600;color:var(--${x.ebt>=0?'green':'red'})">${x.ebt>=0?'+':''}${eur(x.ebt)}</td></tr>`).join('')}
-          <tr style="font-weight:700;background:var(--bg3)"><td>TOTAL</td><td class="td-mono" style="text-align:right;color:var(--green)">${eur(wS)}</td><td class="td-mono" style="text-align:right;color:var(--teal)">-${eur(wM)}</td><td class="td-mono" style="text-align:right;color:var(--teal)">${eur(wS-wM)}</td><td class="td-mono" style="text-align:right;color:var(--amber)">-${eur(wL)}</td><td style="text-align:right"><span class="badge badge-${wLP<=30?'green':wLP<=36?'amber':'red'}">${wLP}%</span></td><td class="td-mono" style="text-align:right">-${eur(wF)}</td><td class="td-mono" style="text-align:right;font-weight:700;color:var(--${wE>=0?'green':'red'})">${wE>=0?'+':''}${eur(wE)}</td></tr>
-        </tbody>
-      </table></div>
-    </div>
-    <div class="card" style="margin-top:16px"><div class="card-header"><span class="card-title">Estructura de costes</span></div><div class="chart-wrap" style="height:200px"><canvas id="c_profit"></canvas></div></div>
-    <div class="alert-item info" style="margin-top:12px;padding:10px 14px"><i class="fa fa-circle-info alert-icon"></i>
-      <div style="font-size:12px"><b>Fijos ${eur(fd)}/día</b> (${eur(Math.round(fixedTotal))}/mes activos) — <button class="btn btn-secondary btn-sm" style="font-size:11px;padding:3px 8px" onclick="go('costs')">Editar costes fijos</button><br><b>MMPP ${Math.round(RATIO_MMPP*100)}%:</b> ratio real BBVA ene-abr 2026</div>
-    </div>
-  </div>`;
-}
-
-function afProfit(){
-  const el=$('c_profit');if(!el)return;
-  const t=today(),labels=[],mv=[],lv=[],fv=[],ev=[];
-  const fd=dynFixedDay();
-  for(let i=13;i>=0;i--){const d=new Date(t);d.setDate(d.getDate()-i);const ds=d.toISOString().split('T')[0];const jd=WEEKLY_LABOR[ds];const sal=Math.round(salesOn(ds)||estSales(ds));const lab=Math.round(jd?jd.cost:laborOn(ds));const mmp=Math.round(sal*RATIO_MMPP);labels.push(i%2===0?sDay(ds):'');mv.push(mmp);lv.push(lab);fv.push(fd);ev.push(Math.max(0,sal-mmp-lab-fd));}
-  new Chart(el,{type:'bar',data:{labels,datasets:[{label:'MMPP',data:mv,backgroundColor:'rgba(20,184,166,0.5)',borderRadius:3,stack:'c'},{label:'Personal',data:lv,backgroundColor:'rgba(245,158,11,0.6)',borderRadius:3,stack:'c'},{label:'Fijos',data:fv,backgroundColor:'rgba(100,116,139,0.5)',borderRadius:3,stack:'c'},{label:'EBITDA',data:ev,backgroundColor:'rgba(34,197,94,0.6)',borderRadius:3,stack:'c'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,labels:{color:'#8b90a8',font:{size:10},boxWidth:8}}},scales:{x:{stacked:true,grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#565c7a',font:{size:9}}},y:{stacked:true,grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#565c7a',callback:v=>'€'+v}}}}});
-}
-
-// ─── RESULTS ────────────────────────────────────────────────
-function plv(k,mn){return FULL_PL[mn][k]||0;}
-function plI(mn){const d=FULL_PL[mn];return d.tpv+d.ef+d.del+d.oi;}
-function plCP(mn){return plv('ali',mn)+plv('beb',mn);}
-function plMB(mn){return plI(mn)+plCP(mn);}
-function plP(mn){return plv('nom',mn)+plv('olab',mn)+plv('ss',mn);}
-function plE(mn){return['alq','luz','gas','tel','agu','imp','ase','mnt','lim','mkt','ban','oex'].reduce((a,k)=>a+plv(k,mn),0);}
-function plR(mn){return plI(mn)+plCP(mn)+plP(mn)+plE(mn);}
-function plT(fn){return[1,2,3,4].reduce((a,m)=>a+fn(m),0);}
-
-function staffingReport(){
-  // Analizar los últimos 60 días con datos reales
-  const COSTE_HR = 12;
-  const OBJ_MIN = 25, OBJ_MAX = 35; // % laboral objetivo hostelería
-  const DOW_LABEL = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-  const cfg = getPlanConfig();
-
-  // Calcular ventas medias por día de semana desde salesHistory
-  const byDow = {0:[],1:[],2:[],3:[],4:[],5:[],6:[]};
-  DB.salesHistory.filter(s=>s.date&&s.date.length>=10).forEach(s=>{
-    const d = new Date(s.date).getDay();
-    if(!isNaN(d)) byDow[d].push(s.amount||0);
-  });
-
-  // Calcular coste por día de semana según reglas actuales
-  const dowAnalysis = [1,2,3,4,5,6,0].map(dow=>{
-    const rule = cfg.rules[dow];
-    const sh = cfg.shifts;
-    const nPersonas = rule.p + Math.max(0,rule.c-rule.p) + Math.max(0,rule.n-rule.p);
-    const horas = rule.p*(hrsOf(sh.partido1.start,sh.partido1.end)+hrsOf(sh.partido2.start,sh.partido2.end))
-                + Math.max(0,rule.c-rule.p)*hrsOf(sh.comida.start,sh.comida.end)
-                + Math.max(0,rule.n-rule.p)*hrsOf(sh.cena.start,sh.cena.end);
-    const costeDia = horas * COSTE_HR;
-    const ventas = byDow[dow];
-    const ventaMedia = ventas.length ? ventas.reduce((a,b)=>a+b,0)/ventas.length : 0;
-    const ratio = ventaMedia > 0 ? costeDia/ventaMedia*100 : null;
-    let estado, color, icon;
-    if(ratio === null){ estado='Sin datos'; color='var(--text3)'; icon='fa-question'; }
-    else if(ratio < OBJ_MIN){ estado='Infradimensionado'; color='var(--amber)'; icon='fa-arrow-down'; }
-    else if(ratio > OBJ_MAX){ estado='Sobredimensionado'; color='var(--red)'; icon='fa-arrow-up'; }
-    else { estado='Óptimo'; color='var(--green)'; icon='fa-check'; }
-    return {dow, label:DOW_LABEL[dow], nPersonas, horas:Math.round(horas), costeDia:Math.round(costeDia), ventaMedia:Math.round(ventaMedia), ratio, estado, color, icon, nDias:ventas.length};
-  });
-
-  // Resumen global
-  const conDatos = dowAnalysis.filter(d=>d.ratio!==null);
-  const totalVentaSemana = conDatos.reduce((a,d)=>a+d.ventaMedia,0);
-  const totalCosteSemana = conDatos.reduce((a,d)=>a+d.costeDia,0);
-  const ratioGlobal = totalVentaSemana>0 ? totalCosteSemana/totalVentaSemana*100 : null;
-  let estadoGlobal, colorGlobal;
-  if(!ratioGlobal){ estadoGlobal='Sin datos suficientes'; colorGlobal='var(--text3)'; }
-  else if(ratioGlobal<OBJ_MIN){ estadoGlobal='Plantilla infradimensionada'; colorGlobal='var(--amber)'; }
-  else if(ratioGlobal>OBJ_MAX){ estadoGlobal='Plantilla sobredimensionada'; colorGlobal='var(--red)'; }
-  else { estadoGlobal='Plantilla óptima'; colorGlobal='var(--green)'; }
-
-  // Recomendaciones automáticas
-  const recs = [];
-  dowAnalysis.forEach(d=>{
-    if(d.ratio===null)return;
-    if(d.ratio > OBJ_MAX + 5){
-      const personasMenos = Math.ceil((d.costeDia - d.ventaMedia*OBJ_MAX/100) / (COSTE_HR * (d.horas/d.nPersonas)));
-      recs.push({tipo:'reducir', dow:d.label, msg:`Reducir ${personasMenos} persona${personasMenos>1?'s':''} — ratio actual ${d.ratio.toFixed(0)}% (objetivo ≤${OBJ_MAX}%)`, color:'var(--red)'});
-    } else if(d.ratio < OBJ_MIN - 5){
-      const personasMas = Math.floor((d.ventaMedia*OBJ_MIN/100 - d.costeDia) / (COSTE_HR * (d.horas/d.nPersonas)));
-      if(personasMas>0) recs.push({tipo:'ampliar', dow:d.label, msg:`Puedes añadir hasta ${personasMas} persona${personasMas>1?'s':''} — ratio actual ${d.ratio.toFixed(0)}% (margen hasta ${OBJ_MIN}%)`, color:'var(--amber)'});
-    }
-  });
-
-  const recRows = recs.length
-    ? recs.map(r=>`<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border)">
-        <i class="fa fa-${r.tipo==='reducir'?'triangle-exclamation':'lightbulb'}" style="color:${r.color};margin-top:2px"></i>
-        <div><strong style="color:var(--text)">${r.dow}:</strong> <span style="color:var(--text2);font-size:13px">${r.msg}</span></div>
-      </div>`).join('')
-    : '<div style="padding:12px;color:var(--text3);font-size:13px">Sin recomendaciones — todos los días dentro del rango óptimo.</div>';
-
-  const tableRows = dowAnalysis.map(d=>{
-    const barW = d.ratio ? Math.min(100, d.ratio/50*100) : 0;
-    const barCol = !d.ratio?'var(--border)':d.ratio<OBJ_MIN?'var(--amber)':d.ratio>OBJ_MAX?'var(--red)':'var(--green)';
-    return`<tr>
-      <td style="font-weight:600">${d.label}</td>
-      <td style="text-align:center">${d.nPersonas}p</td>
-      <td style="text-align:right;font-family:var(--mono)">${d.ventaMedia>0?eur(d.ventaMedia):'—'}</td>
-      <td style="text-align:right;font-family:var(--mono);color:var(--amber)">${eur(d.costeDia)}</td>
-      <td style="min-width:120px">
-        <div style="display:flex;align-items:center;gap:6px">
-          <div style="flex:1;background:var(--bg3);border-radius:4px;height:6px;position:relative">
-            <div style="width:${barW}%;background:${barCol};height:6px;border-radius:4px"></div>
-            <div style="position:absolute;left:${OBJ_MIN/50*100}%;top:-2px;width:1px;height:10px;background:var(--text3);opacity:.4"></div>
-            <div style="position:absolute;left:${OBJ_MAX/50*100}%;top:-2px;width:1px;height:10px;background:var(--text3);opacity:.4"></div>
-          </div>
-          <span style="font-family:var(--mono);font-size:11px;color:${barCol};min-width:36px">${d.ratio!==null?d.ratio.toFixed(0)+'%':'—'}</span>
-        </div>
-      </td>
-      <td><span style="color:${d.color};font-size:12px;display:flex;align-items:center;gap:4px"><i class="fa ${d.icon}"></i>${d.estado}</span></td>
-      <td style="font-size:11px;color:var(--text3)">${d.nDias} días</td>
-    </tr>`;
-  }).join('');
-
-  return`<div class="card" style="margin-top:16px;border-top:3px solid ${colorGlobal}">
-    <div class="card-header">
-      <span class="card-title"><i class="fa fa-users" style="color:${colorGlobal}"></i> Análisis de plantilla</span>
-      <span style="font-size:12px;font-weight:600;color:${colorGlobal}">${estadoGlobal}${ratioGlobal?` · ${ratioGlobal.toFixed(1)}% ratio laboral`:''}</span>
-    </div>
-    <div style="padding:12px 16px;background:var(--bg3);border-bottom:1px solid var(--border);display:flex;gap:24px;flex-wrap:wrap">
-      <div style="font-size:12px;color:var(--text3)">
-        <i class="fa fa-circle-info" style="color:var(--accent)"></i>
-        Objetivo hostelería: <strong style="color:var(--text)">25–35%</strong> coste laboral sobre ventas ·
-        Coste hora estimado: <strong style="color:var(--text)">12€/h</strong> (bruto + SS) ·
-        Basado en <strong style="color:var(--text)">${DB.salesHistory.length} días</strong> de histórico real
-      </div>
-    </div>
-    <div class="table-wrap"><table>
-      <thead><tr>
-        <th>Día</th><th style="text-align:center">Personal</th>
-        <th style="text-align:right">Venta media</th>
-        <th style="text-align:right">Coste personal</th>
-        <th>Ratio laboral <span style="font-size:9px;color:var(--text3);font-weight:400">(objetivo 25–35%)</span></th>
-        <th>Estado</th><th>Muestra</th>
-      </tr></thead>
-      <tbody>${tableRows}</tbody>
-    </table></div>
-    ${recs.length?`<div style="border-top:1px solid var(--border)"><div style="padding:8px 16px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3)">Recomendaciones</div>${recRows}</div>`:''}
-    ${DB.salesHistory.length<14?`<div class="alert-item warning" style="margin:12px 16px 12px"><i class="fa fa-triangle-exclamation alert-icon"></i><div class="alert-msg">Pocos datos históricos (${DB.salesHistory.length} días). Importa el Export-13 para mejorar el análisis.</div></div>`:''}
-  </div>`;
-}
-
-function pgResults(){
-  const mns=[1,2,3,4],TI=plT(plI),TM=plT(plMB),TP=plT(plP),TE=plT(plE),TR=plT(plR);
-  function fv(v,sec,ing){
-    if(v===0&&!['si','sg','res','mb'].includes(sec))return'<span style="color:var(--text3);font-family:var(--mono);font-size:11px">—</span>';
-    const iB=['si','sg','res','mb','mg'].includes(sec);
-    const p=ing>0&&!iB?Math.abs(v)/ing*100:0;
-    const col=sec==='ing'||sec==='si'?'var(--green)':sec==='mb'?'var(--teal)':sec==='res'?(v>=0?'var(--green)':'var(--red)'):sec==='mg'?(v>=0?'var(--green)':'var(--red)'):'var(--red)';
-    if(sec==='mg')return`<span style="font-family:var(--mono);font-size:12px;${iB?'font-weight:700;':''}color:${col}">${v.toFixed(1)}%</span>`;
-    const sign=sec==='ing'||sec==='si'?'':sec==='res'?(v>=0?'+':''):v>0?'+':'';
-    return`<div style="font-family:var(--mono);font-size:12px;${iB?'font-weight:700;':''}color:${col}">${sign}${eur(Math.abs(v))}</div>`+(p>0.05?`<div style="font-size:10px;color:var(--text3)">${p.toFixed(1)}%</div>`:'');
-  }
-  const ROWS=[
-    {s:'A',t:'INGRESOS',rows:[{k:'tpv',l:'Ventas TPV',sec:'ing'},{k:'ef',l:'Ventas efectivo',sec:'ing'},{k:'del',l:'Delivery',sec:'ing'},{k:'oi',l:'Otros ingresos',sec:'ing'},{k:'_si',l:'TOTAL INGRESOS',sec:'si'}]},
-    {s:'B',t:'COSTE DE PRODUCTO',rows:[{k:'ali',l:'Alimentos (Logirest, Santaella…)',sec:'gast'},{k:'beb',l:'Bebidas (Coca-Cola, Heineken)',sec:'gast'},{k:'_cp',l:'Total coste producto',sec:'sg'},{k:'_mb',l:'MARGEN BRUTO',sec:'mb'}]},
-    {s:'C',t:'PERSONAL',rows:[{k:'nom',l:'Nóminas ★',sec:'gast'},{k:'ss',l:'Seguridad Social',sec:'gast'},{k:'olab',l:'Otros costes laborales',sec:'gast'},{k:'_p',l:'Total personal',sec:'sg'}]},
-    {s:'D',t:'GASTOS EXPLOTACIÓN',rows:[{k:'alq',l:'Alquiler (Casa Ros)',sec:'gast'},{k:'luz',l:'Electricidad',sec:'gast'},{k:'gas',l:'Gas (GASIB)',sec:'gast'},{k:'tel',l:'Teléfono',sec:'gast'},{k:'agu',l:'Agua',sec:'gast'},{k:'imp',l:'Impuestos y tributos',sec:'gast'},{k:'ase',l:'Gestoría (Symbol)',sec:'gast'},{k:'mnt',l:'Mantenimiento',sec:'gast'},{k:'lim',l:'Limpieza',sec:'gast'},{k:'mkt',l:'Marketing',sec:'gast'},{k:'ban',l:'Comisiones bancarias',sec:'gast'},{k:'oex',l:'Otros gastos',sec:'gast'},{k:'_e',l:'Total explotación',sec:'sg'}]},
-    {s:'E',t:'RESULTADO',rows:[{k:'_r',l:'RESULTADO OPERATIVO',sec:'res'},{k:'_mg',l:'MARGEN OPERATIVO %',sec:'mg'}]},
-  ];
-  function cv(k,mn){if(k==='_si')return plI(mn);if(k==='_cp')return plCP(mn);if(k==='_mb')return plMB(mn);if(k==='_p')return plP(mn);if(k==='_e')return plE(mn);if(k==='_r')return plR(mn);if(k==='_mg')return plI(mn)>0?plR(mn)/plI(mn)*100:0;return plv(k,mn);}
-  function tv(k){if(k==='_si')return TI;if(k==='_cp')return plT(plCP);if(k==='_mb')return TM;if(k==='_p')return TP;if(k==='_e')return TE;if(k==='_r')return TR;if(k==='_mg')return TI>0?TR/TI*100:0;return[1,2,3,4].reduce((a,m)=>a+plv(k,m),0);}
-  const tRows=ROWS.flatMap(sec=>[
-    `<tr><td colspan="6" style="padding:10px 12px 3px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--accent);background:var(--bg)">${sec.s}. ${sec.t}</td></tr>`,
-    ...sec.rows.map(row=>{
-      const iB=['si','sg','res','mb'].includes(row.sec);
-      const bg=iB?'background:var(--bg3);':'',tb=row.k==='_r'?'border-top:2px solid var(--border2);':'';
-      return`<tr style="${bg}${tb}"><td style="${bg}${tb}font-size:12px;${iB?'font-weight:700;font-size:13px;':''}">${row.l}</td>${mns.map(mn=>`<td style="text-align:right;${bg}${tb}">${fv(cv(row.k,mn),row.sec,plI(mn))}</td>`).join('')}<td style="text-align:right;background:var(--bg3);${tb}">${fv(tv(row.k),row.sec,TI)}</td></tr>`;
-    })
-  ]).join('');
-  const cards=[...mns,0].map((mn,i)=>{
-    const isT=mn===0,ing=isT?TI:plI(mn),mb=isT?TM:plMB(mn),res=isT?TR:plR(mn),n=isT?'ENE–ABR':FULL_PL[mn].name;
-    return`<div class="card card-sm" style="border-top:3px solid var(--${res>=0?'green':'red'})${isT?';background:var(--bg3)':''}"><div style="font-size:${isT?14:13}px;font-weight:${isT?700:600};margin-bottom:6px">${n}</div><div style="font-size:10px;color:var(--text3)">Ingresos</div><div style="font-size:13px;font-weight:600;font-family:var(--mono);color:var(--green)">${eur(Math.round(ing))}</div><div style="font-size:10px;color:var(--text3);margin-top:4px">Margen bruto</div><div style="font-size:13px;font-weight:600;font-family:var(--mono);color:var(--teal)">${eur(Math.round(mb))} <span style="font-size:10px">${ing>0?Math.round(mb/ing*100):0}%</span></div><div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px"><div style="font-size:10px;color:var(--text3)">Resultado</div><div style="font-size:${isT?17:15}px;font-weight:700;font-family:var(--mono);color:var(--${res>=0?'green':'red'})">${res>=0?'+':''}${eur(Math.round(Math.abs(res)))}</div><div style="font-size:10px;color:var(--${res>=0?'green':'red'})">${ing>0?(res/ing*100).toFixed(1):0}%</div></div></div>`;
-  }).join('');
-  return`<div class="page-header"><div><h2>Cuenta de resultados</h2><p>Enero–Abril 2026 · Datos reales BBVA · Sin devoluciones a socios (140.000€)</p></div></div>
-  <div class="page-body">
-    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px">${cards}</div>
-    <div class="card"><div class="card-header"><span class="card-title">P&amp;G detallado</span><span style="font-size:11px;color:var(--text3)">% sobre ingresos · ★ nóminas feb pendiente verificar</span></div>
-      <div class="table-wrap"><table><thead><tr><th style="min-width:250px">Concepto</th>${mns.map(mn=>`<th style="text-align:right;min-width:110px">${FULL_PL[mn].name}</th>`).join('')}<th style="text-align:right;min-width:110px;background:var(--bg3)">TOTAL</th></tr></thead><tbody>${tRows}</tbody></table></div>
-    </div>
-    <div class="alert-item info" style="margin-top:12px;padding:10px 14px"><i class="fa fa-circle-info alert-icon"></i><div style="font-size:12px"><b>Excluido:</b> UNPU GROUP 70k€ + LUIS MAYORDOMO 35k€ + REBECA CHACÓN 35k€ = 140.000€<br>★ Nóminas feb: banco refleja solo 894€ — verificar pago por otra cuenta</div></div>
-    <div class="grid-2 section-gap" style="margin-top:16px">
-      <div class="card"><div class="card-header"><span class="card-title">Ingresos · Margen · Resultado</span></div><div class="chart-wrap" style="height:200px"><canvas id="c_pl1"></canvas></div></div>
-      <div class="card"><div class="card-header"><span class="card-title">Estructura de costes</span></div><div class="chart-wrap" style="height:200px"><canvas id="c_pl2"></canvas></div></div>
-    </div>
-    ${staffingReport()}
-  </div>`;
-}
-function afResults(){
-  const mns=[1,2,3,4],names=['Ene','Feb','Mar','Abr'];
-  const e1=$('c_pl1');
-  if(e1)new Chart(e1,{type:'bar',data:{labels:names,datasets:[{label:'Ingresos',data:mns.map(m=>Math.round(plI(m))),backgroundColor:'rgba(79,124,255,0.3)',borderRadius:4},{label:'Margen bruto',data:mns.map(m=>Math.round(plMB(m))),backgroundColor:'rgba(20,184,166,0.4)',borderRadius:4},{label:'Resultado',data:mns.map(m=>Math.round(plR(m))),type:'line',borderColor:'#22c55e',pointBackgroundColor:'#22c55e',pointRadius:5,fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,labels:{color:'#8b90a8',font:{size:10},boxWidth:8}}},scales:{x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#565c7a'}},y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#565c7a',callback:v=>Math.round(v/1000)+'k€'}}}}});
-  const cats=[['Alim+Beb',plT(plCP)],['Personal',plT(plP)],['Impuestos',[1,2,3,4].reduce((a,m)=>a+plv('imp',m),0)],['Alquiler',[1,2,3,4].reduce((a,m)=>a+plv('alq',m),0)],['Suministros',[1,2,3,4].reduce((a,m)=>a+plv('luz',m)+plv('gas',m)+plv('tel',m)+plv('agu',m),0)],['Otros',[1,2,3,4].reduce((a,m)=>a+plv('ase',m)+plv('mnt',m)+plv('lim',m)+plv('mkt',m)+plv('ban',m)+plv('oex',m),0)]];
-  const e2=$('c_pl2');
-  if(e2)new Chart(e2,{type:'doughnut',data:{labels:cats.map(c=>c[0]),datasets:[{data:cats.map(c=>Math.round(Math.abs(c[1]))),backgroundColor:['#14b8a6','#4f7cff','#ef4444','#22c55e','#f59e0b','#64748b'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,position:'right',labels:{color:'#8b90a8',font:{size:9},boxWidth:7}}},cutout:'55%'}});
-}
-
-// ─── BANK ───────────────────────────────────────────────────
-function pgBank(){
-  const tI=DB.bankMovements.filter(m=>m.type==='income').reduce((a,m)=>a+m.amount,0);
-  const tG=Math.abs(DB.bankMovements.filter(m=>m.type==='expense').reduce((a,m)=>a+m.amount,0));
-  const catL={ventas_tpv:'TPV',ventas_efectivo:'Efectivo',delivery:'Delivery',otros_ingresos:'Otros ing.',nominas:'Nóminas',seg_social:'Seg.Social',alquiler:'Alquiler',suministros:'Suministros',proveedores:'Proveedores',impuestos:'Impuestos',asesoria:'Gestoría',mantenimiento:'Mantenimiento',limpieza:'Limpieza',banco:'Comisiones',otros_gastos:'Otros gastos'};
-  return`<div class="page-header"><div><h2>Conciliación bancaria</h2><p>${DB.bankMovements.length} movimientos</p></div><div class="page-actions"><button class="btn btn-primary btn-sm" onclick="go('importer')"><i class="fa fa-file-import"></i> Importar</button></div></div>
-  <div class="page-body">
-    <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
-      <div class="kpi-card green"><div class="kpi-label">Ingresos</div><div class="kpi-value" style="font-size:20px;color:var(--green)">${eur(Math.round(tI))}</div></div>
-      <div class="kpi-card red"><div class="kpi-label">Gastos</div><div class="kpi-value" style="font-size:20px;color:var(--red)">${eur(Math.round(tG))}</div></div>
-      <div class="kpi-card ${tI-tG>=0?'green':'red'}"><div class="kpi-label">Saldo neto</div><div class="kpi-value" style="font-size:20px;color:var(--${tI-tG>=0?'green':'red'})">${eur(Math.round(tI-tG))}</div></div>
-    </div>
-    ${DB.bankMovements.length
-      ?`<div class="card" style="margin-top:16px"><div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Descripción</th><th style="text-align:right">Importe</th><th>Categoría</th></tr></thead>
-        <tbody>${DB.bankMovements.slice(0,100).map(m=>`<tr><td style="font-size:12px;color:var(--text3)">${m.date}</td><td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.description}">${m.description}</td><td class="td-mono" style="text-align:right;color:var(--${m.type==='income'?'green':'red'})">${m.type==='income'?'+':''}${eur(m.amount)}</td><td><select class="category-select" onchange="updCat(${m.id},this.value)">${Object.keys(catL).map(c=>`<option value="${c}" ${m.category===c?'selected':''}>${catL[c]}</option>`).join('')}</select></td></tr>`).join('')}</tbody>
-        </table></div></div>`
-      :`<div class="card" style="margin-top:16px"><div class="empty-state"><i class="fa fa-building-columns"></i><p>Sin movimientos. <a href="#" onclick="go('importer')" style="color:var(--accent)">Importar BBVA</a></p></div></div>`}
-  </div>`;
+          ${horasDeficit>0?'<span style="color:var(--red)">⚠ '+horasDeficit+' franjas con déficit</span>':'<span style="color:var(--green)">✓ Cobertura completa</span>'}
+  </div>`:''}
+`;
 }
 function updCat(id,cat){const m=DB.bankMovements.find(x=>x.id===id);if(m){m.category=cat;save();}}
 
