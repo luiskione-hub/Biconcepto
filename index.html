@@ -1267,9 +1267,9 @@ const DB = {
   currentUser: null,
   users:[
     {id:1,name:'Administrador',role:'admin',    user:'admin',    pass:'1234',avatar:'A',mustChange:false},
-    {id:2,name:'Gerente',      role:'gerente',  user:'gerente',  pass:'1234',avatar:'G',mustChange:true},
-    {id:3,name:'Encargado',    role:'encargado',user:'encargado',pass:'1234',avatar:'E',mustChange:true},
-    {id:4,name:'Solo Lectura', role:'reader',   user:'reader',   pass:'1234',avatar:'R',mustChange:true},
+    {id:2,name:'Gerente',      role:'gerente',  user:'gerente',  pass:'1234',avatar:'G',mustChange:false},
+    {id:3,name:'Encargado',    role:'encargado',user:'encargado',pass:'1234',avatar:'E',mustChange:false},
+    {id:4,name:'Solo Lectura', role:'reader',   user:'reader',   pass:'1234',avatar:'R',mustChange:false},
   ],
   employees:[
     {id:1, name:'Fátima Embark',          type:'full',wh:40,hc:9.25,mc:1603,sick:0,active:true,notes:'',fs:[]},
@@ -1362,6 +1362,25 @@ function _applyData(p){
     const raw=_store.getItem('biconcepto_v3');
     if(raw){ _applyData(JSON.parse(raw)); updateSyncIndicator('local'); }
   }catch(e){}
+
+  // Garantizar que siempre hay usuarios con contraseñas funcionales
+  // Esto evita quedar bloqueado si Supabase sobreescribió las contraseñas
+  const _defaults=[
+    {id:1,name:'Administrador',role:'admin',    user:'admin',    pass:'1234',avatar:'A',mustChange:false},
+    {id:2,name:'Gerente',      role:'gerente',  user:'gerente',  pass:'1234',avatar:'G',mustChange:false},
+    {id:3,name:'Encargado',    role:'encargado',user:'encargado',pass:'1234',avatar:'E',mustChange:false},
+    {id:4,name:'Solo Lectura', role:'reader',   user:'reader',   pass:'1234',avatar:'R',mustChange:false},
+  ];
+  if(!DB.users||DB.users.length===0){
+    DB.users=_defaults;
+  } else {
+    // Asegurar que los usuarios por defecto existen con contraseña funcional
+    _defaults.forEach(def=>{
+      const existing=DB.users.find(u=>u.user===def.user);
+      if(!existing){ DB.users.push(def); }
+      else if(!existing.pass){ existing.pass=def.pass; }
+    });
+  }
 
   // 2. Intentar Supabase en segundo plano
   // Si tiene datos más recientes, aplicarlos y refrescar la UI
