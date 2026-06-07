@@ -1820,6 +1820,16 @@ function go(page){
 // 6. PAGES
 // ═══════════════════════════════════════════════════════════
 
+// ─── HELPERS DE DATOS ────────────────────────────────────────
+function dynFixedDay(){
+  // Coste fijo diario = suma de costes fijos activos / días del mes
+  const active = DB.fixedCosts && DB.fixedCosts.length
+    ? DB.fixedCosts.filter(c=>c.active!==false).reduce((a,c)=>a+(c.amount||0),0)
+    : FIXED_MONTHLY;
+  const d = new Date();
+  return Math.round(active / new Date(d.getFullYear(), d.getMonth()+1, 0).getDate());
+}
+
 // ─── DASHBOARD ──────────────────────────────────────────────
 function pgDashboard(){
   const t=today(),sal=salesOn(t)||estSales(t),jd=WEEKLY_LABOR[t];
@@ -5510,6 +5520,39 @@ function pgOptimalStaff(){
 
   </div>`;
 }
+function autoplanMdl(){
+  const now=new Date();
+  const selY=parseInt(_store.getItem('cal_y')||now.getFullYear());
+  const selM=parseInt(_store.getItem('cal_m')||now.getMonth()+1);
+  const mStr=`${selY}-${String(selM).padStart(2,'0')}`;
+  const mLabel=new Date(selY,selM-1,1).toLocaleString('es-ES',{month:'long',year:'numeric'});
+  const existing=DB.shifts.filter(s=>s.date.startsWith(mStr));
+  const vacMes=DB.vacations.filter(v=>v.status!=='rejected'&&
+    (v.start.slice(0,7)===mStr||v.end.slice(0,7)===mStr)).length;
+  const cfg=getPlanConfig();
+  const activeRules=(cfg.assignRules||[]).filter(r=>r.active!==false);
+  modal(`<div class="modal" style="max-width:480px">
+    <div class="modal-header"><h3 class="modal-title"><i class="fa fa-wand-magic-sparkles"></i> Generar cuadrante — ${mLabel}</h3></div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:10px">
+      <div style="background:var(--bg3);border-radius:8px;padding:12px;font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--text2)">
+        <div><i class="fa fa-users" style="color:var(--accent);width:16px"></i> <strong>${DB.employees.filter(e=>e.active&&!e.sick).length} empleados</strong> activos</div>
+        <div><i class="fa fa-scale-balanced" style="color:var(--teal);width:16px"></i> Convenio Ceuta: max 5 dias/semana, 12h descanso</div>
+        <div><i class="fa fa-umbrella-beach" style="color:var(--amber);width:16px"></i> ${vacMes} periodo${vacMes!==1?'s':''} de vacaciones en ${mLabel}</div>
+        <div><i class="fa fa-shield-halved" style="color:var(--purple);width:16px"></i> ${activeRules.length} regla${activeRules.length!==1?'s':''} de asignacion activas</div>
+      </div>
+      ${existing.length>0?`<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--red)">
+        <i class="fa fa-triangle-exclamation"></i> Hay <strong>${existing.length} turnos</strong> en ${mLabel}. Se <strong>borraran todos</strong> y se regeneraran desde cero.
+      </div>`:``}
+    </div>
+    <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="closeModal();autoplanMonth(${selY},${selM})">
+        <i class="fa fa-wand-magic-sparkles"></i> Generar cuadrante desde cero
+      </button>
+    </div>
+  </div>`);
+}
+
 function genScheduleFromOptimal(y, m){
   const mStr=`${y}-${String(m).padStart(2,'0')}`;
   const mLabel=new Date(y,m-1,1).toLocaleString('es-ES',{month:'long',year:'numeric'});
