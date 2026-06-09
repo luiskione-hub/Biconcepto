@@ -1970,7 +1970,12 @@ function empMdl(id){
         <div class="form-group"><label class="form-label">Jornada</label>
           <select class="form-control" id="eT" onchange="toggleFsSection(this.value)">
             <option value="full" ${!e||e.type==='full'?'selected':''}>40h — Jornada completa</option>
+            <option value="part35" ${e&&e.type==='part35'?'selected':''}>35h — Jornada reducida</option>
+            <option value="part30" ${e&&e.type==='part30'?'selected':''}>30h — Jornada reducida</option>
+            <option value="part25" ${e&&e.type==='part25'?'selected':''}>25h — Media jornada +</option>
             <option value="part" ${e&&e.type==='part'?'selected':''}>20h — Media jornada</option>
+            <option value="part15" ${e&&e.type==='part15'?'selected':''}>15h — Jornada parcial</option>
+            <option value="part10" ${e&&e.type==='part10'?'selected':''}>10h — Jornada parcial</option>
           </select></div>
         <div class="form-group"><label class="form-label">Estado</label>
           <select class="form-control" id="eS">
@@ -2017,7 +2022,7 @@ function empMdl(id){
 
 function toggleFsSection(val){
   const s=document.getElementById('fsSect');
-  if(s) s.style.display=val==='part'?'block':'none';
+  if(s) s.style.display=val!=='full'?'block':'none';
 }
 
 function addFsRow(){
@@ -2049,8 +2054,10 @@ function saveEmp(id){
   const n=$('eN').value.trim(); if(!n){alert('Introduce el nombre');return;}
   const type=$('eT').value, st=$('eS').value;
   const hr=parseFloat($('eCH').value)||hrate();
+  const whMap={'full':40,'part35':35,'part30':30,'part25':25,'part':20,'part15':15,'part10':10};
+  const wh=whMap[type]||20;
   let fs=[];
-  if(type==='part'){
+  if(type!=='full'){
     const dSelects=document.querySelectorAll('[data-fs-d]');
     dSelects.forEach((sel,i)=>{
       const sEl=document.querySelector('[data-fs-s="'+i+'"]');
@@ -2060,8 +2067,8 @@ function saveEmp(id){
   }
   const data={
     name:n, nick:$('eNick').value.trim()||n.split(' ')[0],
-    type, wh:type==='full'?40:20, hc:hr,
-    mc:parseInt($('eCM').value)||(type==='full'?Math.round(hr*40*52/12):Math.round(hr*20*52/12)),
+    type, wh, hc:hr,
+    mc:parseInt($('eCM').value)||Math.round(hr*wh*52/12),
     sick:st==='s'?1:0, active:st!=='i',
     cat:$('eCat').value, tel:$('eTel').value.trim(),
     vacDias:parseInt($('eVacDias').value)||30,
@@ -2273,7 +2280,7 @@ function availableEmps(ds){
   return DB.employees.filter(e=>{
     if(!e.active||e.sick>0) return false;
     if(vacas.has(e.id)) return false;
-    if(e.type==='part'&&e.fs&&e.fs.length){
+    if(e.type!=='full'&&e.fs&&e.fs.length){
       if(!e.fs.some(f=>f.d===dow)) return false;
     }
     return true;
@@ -2368,7 +2375,7 @@ function autoplanMonth(y,m){
       return r.slice(0,n);
     }
 
-    const pPart=disponibles.filter(e=>e.fs&&e.fs.some(f=>f.d===dow&&f.s===SH.partido1.start));
+    const pPart=disponibles.filter(e=>e.fs&&e.fs&&e.fs.some(f=>f.d===dow&&f.s===SH.partido1.start));
     const pCom=disponibles.filter(e=>e.fs&&e.fs.some(f=>f.d===dow&&f.s===SH.comida.start));
     const pCena=disponibles.filter(e=>e.fs&&e.fs.some(f=>f.d===dow&&f.s===SH.cena.start));
     const flex=disponibles.filter(e=>!e.fs||!e.fs.length);
