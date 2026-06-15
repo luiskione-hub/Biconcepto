@@ -1430,10 +1430,23 @@ async function supabaseLoad(){
     const res = await fetch(`${SUPA_URL}/rest/v1/app_state?id=eq.main&select=data,updated_at`,{
       headers: SUPA_HDR
     });
-    if(!res.ok) return null;
+    if(!res.ok){
+      console.warn('Supabase load error:', res.status, res.statusText);
+      return null;
+    }
     const rows = await res.json();
     return rows&&rows.length ? rows[0] : null;
-  }catch(e){ return null; }
+  }catch(e){
+    console.warn('Supabase connection error:', e.message);
+    return null;
+  }
+}
+
+// Ping para despertar el proyecto Supabase si está en pausa (plan gratuito)
+async function supabaseWakeup(){
+  try{
+    await fetch(`${SUPA_URL}/rest/v1/`, { headers: SUPA_HDR });
+  }catch(e){}
 }
 
 // Indicador de estado de sincronización
@@ -1874,46 +1887,41 @@ function afDashboard(){
 // ─── EMPLOYEES ──────────────────────────────────────────────
 function pgEmployees(){
   const DOW=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-  return`<div class="page-header">
-    <div><h2>Empleados</h2>
-    <p>${DB.employees.filter(e=>e.active).length} activos · ${DB.employees.filter(e=>e.sick>0).length} de baja · ${DB.employees.filter(e=>!e.active).length} inactivos</p>
-    </div>
-    <div class="page-actions"><button class="btn btn-primary" onclick="empMdl()"><i class="fa fa-plus"></i> Nuevo</button></div>
-  </div>
-  <div class="page-body"><div class="card"><div class="table-wrap"><table>
-    <thead><tr><th>Nombre</th><th>Categoría</th><th>Jornada</th><th>€/h</th><th>Días fijos</th><th>Vacaciones</th><th>Estado</th><th></th></tr></thead>
-    <tbody>${DB.employees.map(e=>{
-      const fsInfo=e.type==='part'&&e.fs&&e.fs.length
-        ?e.fs.map(f=>`<span style="background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:2px 5px;font-size:10px;font-family:var(--mono);white-space:nowrap">${DOW[f.d]} ${f.s}-${f.e}</span>`).join(' ')
-        :e.type==='part'?'<span style="color:var(--red);font-size:11px">⚠ Sin configurar</span>':'<span style="color:var(--text3);font-size:11px">—</span>';
-
-      // Días de vacaciones: total - gastados
-      const vacUsed=DB.vacations.filter(v=>v.employee_id===e.id&&v.status!=='rejected'&&
-        new Date(v.start).getFullYear()===new Date().getFullYear())
-        .reduce((a,v)=>a+(v.days||Math.round((new Date(v.end)-new Date(v.start))/86400000)+1),0);
-      const vacTotal=e.vacDias||30;
-      const vacLeft=vacTotal-vacUsed;
-      const vacColor=vacLeft<=5?'var(--red)':vacLeft<=10?'var(--amber)':'var(--green)';
-
-      return`<tr>
-        <td>
-          <div style="font-weight:600">${e.name}</div>
-          ${e.tel?`<div style="font-size:11px;color:var(--text3)">${e.tel}</div>`:''}
-        </td>
-        <td style="font-size:12px;color:var(--text2)">${e.cat||'—'}</td>
-        <td><span class="badge badge-${e.type==='full'?'blue':'amber'}">${e.wh}h</span></td>
-        <td class="td-mono">${e.hc}€</td>
-        <td style="display:flex;flex-wrap:wrap;gap:3px;max-width:200px">${fsInfo}</td>
-        <td style="text-align:center">
-          <span style="font-weight:600;color:${vacColor}">${vacLeft}</span>
-          <span style="font-size:10px;color:var(--text3)">/${vacTotal}d</span>
-        </td>
-        <td>${e.sick>0?'<span class="badge badge-red">🏥 Baja</span>':e.active?'<span class="badge badge-green">Activo</span>':'<span class="badge badge-gray">Inactivo</span>'}</td>
-        <td><button class="btn btn-secondary btn-sm btn-icon" onclick="empMdl(${e.id})"><i class="fa fa-pencil"></i></button></td>
-      </tr>`;
-    }).join('')}</tbody>
-  </table></div></div></div>`;
+  const rows=DB.employees.map(e=>{
+    // Días fijos info - usando concatenación para evitar backticks anidados
+    let fsInfo;
+    if(e.type!=='full'&&e.fs&&e.fs.length){
+      fsInfo=e.fs.map(f=>'<span style="background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:2px 5px;font-size:10px;font-family:var(--mono);white-space:nowrap">'+DOW[f.d]+' '+f.s+'-'+f.e+'</span>').join(' ');
+    } else if(e.type!=='full'){
+      fsInfo='<span style="color:var(--red);font-size:11px">⚠ Sin configurar</span>';
+    } else {
+      fsInfo='<span style="color:var(--text3);font-size:11px">—</span>';
+    }
+    // Días de vacaciones
+    const vacUsed=DB.vacations.filter(v=>v.employee_id===e.id&&v.status!=='rejected'&&new Date(v.start).getFullYear()===new Date().getFullYear()).reduce((a,v)=>a+(v.days||Math.round((new Date(v.end)-new Date(v.start))/86400000)+1),0);
+    const vacTotal=e.vacDias||30;
+    const vacLeft=vacTotal-vacUsed;
+    const vacColor=vacLeft<=5?'var(--red)':vacLeft<=10?'var(--amber)':'var(--green)';
+    const statusBadge=e.sick>0?'<span class="badge badge-red">🏥 Baja</span>':e.active?'<span class="badge badge-green">Activo</span>':'<span class="badge badge-gray">Inactivo</span>';
+    return '<tr>'
+      +'<td><div style="font-weight:600">'+e.name+'</div>'+(e.tel?'<div style="font-size:11px;color:var(--text3)">'+e.tel+'</div>':'')+'</td>'
+      +'<td style="font-size:12px;color:var(--text2)">'+(e.cat||'—')+'</td>'
+      +'<td><span class="badge badge-'+(e.type==='full'?'blue':'amber')+'">'+e.wh+'h</span></td>'
+      +'<td class="td-mono">'+e.hc+'€</td>'
+      +'<td style="display:flex;flex-wrap:wrap;gap:3px;max-width:200px">'+fsInfo+'</td>'
+      +'<td style="text-align:center"><span style="font-weight:600;color:'+vacColor+'">'+vacLeft+'</span><span style="font-size:10px;color:var(--text3)">/'+ vacTotal+'d</span></td>'
+      +'<td>'+statusBadge+'</td>'
+      +'<td><button class="btn btn-secondary btn-sm btn-icon" onclick="empMdl('+e.id+')"><i class="fa fa-pencil"></i></button></td>'
+      +'</tr>';
+  }).join('');
+  return '<div class="page-header"><div><h2>Empleados</h2>'
+    +'<p>'+DB.employees.filter(e=>e.active).length+' activos · '+DB.employees.filter(e=>e.sick>0).length+' de baja · '+DB.employees.filter(e=>!e.active).length+' inactivos</p>'
+    +'</div><div class="page-actions"><button class="btn btn-primary" onclick="empMdl()"><i class="fa fa-plus"></i> Nuevo</button></div></div>'
+    +'<div class="page-body"><div class="card"><div class="table-wrap"><table>'
+    +'<thead><tr><th>Nombre</th><th>Categoría</th><th>Jornada</th><th>€/h</th><th>Días fijos</th><th>Vacaciones</th><th>Estado</th><th></th></tr></thead>'
+    +'<tbody>'+rows+'</tbody></table></div></div></div>';
 }
+
 function empMdl(id){
   const e=id?DB.employees.find(x=>x.id===id):null;
   const isPart=e&&e.type==='part';
@@ -2439,6 +2447,43 @@ function autoplanMonth(y,m){
 }
 // ─────────────────────────────────────────────────────────────
 
+function updateShift(id, field, val){
+  const s=DB.shifts.find(x=>x.id===id); if(!s)return;
+  s[field]=val;
+  // Recalcular coste si cambia hora
+  if(field==='start'||field==='end'){
+    const emp=DB.employees.find(e=>e.id===s.employee_id);
+    if(emp) s.cost=parseFloat((hrsOf(s.start,s.end)*emp.hc).toFixed(2));
+  }
+  save();
+}
+function deleteShift(id, ds){
+  DB.shifts=DB.shifts.filter(x=>x.id!==id);
+  save(); calClick(ds);
+}
+function applyTemplateDayMdl(ds){
+  const dow=new Date(ds).getDay();
+  const available=DB.employees.filter(e=>e.active&&!e.sick&&e.fs&&e.fs.some(f=>f.d===dow));
+  if(!available.length){flash('No hay empleados con días fijos configurados para este día');return;}
+  if(!confirm(`¿Aplicar plantilla de turnos fijos para el ${dayN(ds)} ${ds}? Se añadirán ${available.length} turnos.`))return;
+  let added=0;
+  available.forEach(emp=>{
+    emp.fs.filter(f=>f.d===dow).forEach(f=>{
+      if(DB.shifts.some(s=>s.employee_id===emp.id&&s.date===ds&&s.start===f.s))return;
+      DB.shifts.push({id:maxId(DB.shifts),employee_id:emp.id,date:ds,start:f.s,end:f.e,
+        cost:parseFloat((hrsOf(f.s,f.e)*emp.hc).toFixed(2)),status:'template'});
+      added++;
+    });
+  });
+  save(); flash(`✓ ${added} turnos de plantilla aplicados`); calClick(ds);
+}
+function applyTplMdl(y,m){
+  const n=applyTemplateToMonth(y,m);
+  save(); flash(`✓ ${n} turnos de plantilla aplicados al mes`); go('schedule');
+}
+function editTemplateMdl(){go('employees');}
+
+
 function pgShifts(){
   return`<div class="page-header"><div><h2>Turnos</h2><p>${DB.shifts.length} registrados</p></div><div class="page-actions"><button class="btn btn-primary" onclick="shiftMdl()"><i class="fa fa-plus"></i> Nuevo turno</button></div></div>
   <div class="page-body"><div class="card"><div class="table-wrap"><table>
@@ -2446,6 +2491,7 @@ function pgShifts(){
     <tbody>${DB.shifts.length?DB.shifts.slice().reverse().slice(0,60).map(s=>{const e=DB.employees.find(x=>x.id===s.employee_id);return`<tr><td class="td-bold">${e?e.name.split(' ')[0]:'?'}</td><td>${sDay(s.date)} ${s.date}</td><td class="td-mono">${s.start}</td><td class="td-mono">${s.end}</td><td class="td-mono">${eur(s.cost)}</td><td><button class="btn btn-danger btn-sm btn-icon" onclick="DB.shifts=DB.shifts.filter(x=>x.id!==${s.id});save();go('shifts')"><i class="fa fa-trash"></i></button></td></tr>`;}).join(''):'<tr><td colspan="6" style="text-align:center;color:var(--text3)">Sin turnos</td></tr>'}</tbody>
   </table></div></div></div>`;
 }
+
 function shiftMdl(date){
   modal(`<div class="modal">
     <div class="modal-header"><h3>Nuevo turno</h3><button class="btn-close-modal" onclick="closeModal()"><i class="fa fa-xmark"></i></button></div>
@@ -2867,9 +2913,22 @@ function calClick(ds){
         <span style="font-weight:600;font-size:13px"><i class="fa fa-chart-bar" style="color:var(--accent)"></i> Cobertura vs necesidades</span>
         <div style="display:flex;gap:8px;font-size:11px">
           ${horasDeficit>0?'<span style="color:var(--red)">⚠ '+horasDeficit+' franjas con déficit</span>':'<span style="color:var(--green)">✓ Cobertura completa</span>'}
-  </div>`:''}
-`;
+        </div>
+      </div>
+      <div class="table-wrap"><table style="min-width:300px">
+        <thead><tr>
+          <th style="padding:3px 8px;font-size:11px">Franja</th>
+          <th style="text-align:center;padding:3px 6px;font-size:11px;color:var(--text3)">Necesario</th>
+          <th style="text-align:center;padding:3px 6px;font-size:11px;color:var(--accent)">Cubierto</th>
+          <th style="padding:3px 8px;font-size:11px">Cobertura</th>
+        </tr></thead>
+        <tbody>${coverageRows}</tbody>
+      </table></div>
+    </div>
+    `:''}
+  </div>`;
 }
+
 function updCat(id,cat){const m=DB.bankMovements.find(x=>x.id===id);if(m){m.category=cat;save();}}
 
 // ─── LEGAL ──────────────────────────────────────────────────
@@ -3048,38 +3107,233 @@ function staffingReport(){
 }
 
 function pgResults(){
-  const now=new Date(), y=now.getFullYear();
-  const meses=Object.keys(FULL_PL).map(Number).sort((a,b)=>a-b);
-  const rows=meses.map(m=>{
-    const d=FULL_PL[m];
-    const margen=d.tpv+d.ali+d.beb+d.nom+d.olab+d.ss+d.alq+d.luz+d.gas+d.tel+d.agu+(d.del||0)+(d.oi||0)+(d.imp||0);
-    const pctLab=d.tpv>0?Math.round((Math.abs(d.nom)+Math.abs(d.ss))/d.tpv*100):0;
-    return`<tr>
-      <td style="font-weight:600">${d.name}</td>
-      <td class="td-mono" style="color:var(--green)">${eur(d.tpv)}</td>
-      <td class="td-mono" style="color:var(--amber)">${eur(Math.abs(d.nom)+Math.abs(d.ss))}</td>
+  const now=new Date(), curY=now.getFullYear();
+
+  // Mapeo de categorías del banco a partidas de la P&G
+  const CAT_MAP = {
+    // Ingresos
+    'ventas_tpv':     {grupo:'ingresos', label:'Ventas TPV',          key:'tpv'},
+    'ventas_efectivo':{grupo:'ingresos', label:'Ventas efectivo',      key:'ef'},
+    'delivery':       {grupo:'ingresos', label:'Delivery (Glovo/UE)',  key:'del'},
+    'otros_ingresos': {grupo:'ingresos', label:'Otros ingresos',       key:'oi'},
+    // Costes personal
+    'nominas':        {grupo:'personal', label:'Nóminas',              key:'nom'},
+    'seg_social':     {grupo:'personal', label:'Seguridad Social',     key:'ss'},
+    // Costes explotación
+    'proveedores':    {grupo:'explotacion', label:'Materias primas',   key:'ali'},
+    'alquiler':       {grupo:'explotacion', label:'Alquiler',          key:'alq'},
+    'suministros':    {grupo:'explotacion', label:'Suministros',       key:'luz'},
+    'impuestos':      {grupo:'explotacion', label:'Impuestos/AEAT',    key:'imp'},
+    'asesoria':       {grupo:'explotacion', label:'Asesoría',          key:'ase'},
+    'mantenimiento':  {grupo:'explotacion', label:'Mantenimiento',     key:'mnt'},
+    'limpieza':       {grupo:'explotacion', label:'Limpieza',          key:'lim'},
+    'banco':          {grupo:'explotacion', label:'Comisiones banco',  key:'ban'},
+    'otros_gastos':   {grupo:'explotacion', label:'Otros gastos',      key:'oex'},
+  };
+
+  // Construir P&G por mes desde bankMovements
+  function buildPL(year){
+    const pl = {};
+    // Inicializar meses
+    for(let m=1;m<=12;m++){
+      const name = new Date(year,m-1,1).toLocaleString('es-ES',{month:'long'});
+      pl[m] = {name, tpv:0,ef:0,del:0,oi:0,nom:0,ss:0,ali:0,alq:0,luz:0,imp:0,ase:0,mnt:0,lim:0,ban:0,oex:0, hasData:false};
+    }
+    // Acumular movimientos bancarios
+    DB.bankMovements.forEach(mov=>{
+      if(!mov.date||mov.date.length<7) return;
+      const movY = parseInt(mov.date.slice(0,4));
+      if(movY !== year) return;
+      const m = parseInt(mov.date.slice(5,7));
+      if(m<1||m>12) return;
+      const cat = mov.category||'otros_gastos';
+      const map = CAT_MAP[cat];
+      if(!map) return;
+      pl[m][map.key] = (pl[m][map.key]||0) + (mov.amount||0);
+      pl[m].hasData = true;
+    });
+    // También incluir ventas de salesHistory si no hay TPV en banco
+    DB.salesHistory.filter(s=>{
+      if(!s.date||s.date.length<7) return false;
+      return parseInt(s.date.slice(0,4))===year && s._src==='exp13';
+    }).forEach(s=>{
+      const m = parseInt(s.date.slice(5,7));
+      if(m<1||m>12) return;
+      // Solo añadir si no hay ya movimientos TPV de banco para ese mes
+      if(!pl[m].hasData) pl[m].tpv += (s.amount||0);
+    });
+    // Completar con FULL_PL para meses sin datos bancarios (retrocompatibilidad)
+    Object.entries(FULL_PL).forEach(([mStr, fpl])=>{
+      const m = parseInt(mStr);
+      if(fpl && !pl[m].hasData){
+        pl[m] = {...pl[m], ...fpl, hasData:false, _src:'historical'};
+      }
+    });
+    return pl;
+  }
+
+  const pl = buildPL(curY);
+  const mesesConDatos = Object.entries(pl).filter(([m,d])=>d.hasData||FULL_PL[parseInt(m)]);
+
+  // Calcular margen para cada mes
+  function margen(d){
+    return (d.tpv||0)+(d.ef||0)+(d.del||0)+(d.oi||0)+
+           (d.nom||0)+(d.ss||0)+(d.ali||0)+(d.alq||0)+
+           (d.luz||0)+(d.imp||0)+(d.ase||0)+(d.mnt||0)+
+           (d.lim||0)+(d.ban||0)+(d.oex||0);
+  }
+
+  function ventas(d){ return (d.tpv||0)+(d.ef||0)+(d.del||0)+(d.oi||0); }
+  function personal(d){ return Math.abs(d.nom||0)+Math.abs(d.ss||0); }
+  function gastos(d){ return Math.abs(d.ali||0)+Math.abs(d.alq||0)+Math.abs(d.luz||0)+Math.abs(d.imp||0)+Math.abs(d.ase||0)+Math.abs(d.mnt||0)+Math.abs(d.lim||0)+Math.abs(d.ban||0)+Math.abs(d.oex||0); }
+
+  // Filas resumen
+  const rows = mesesConDatos.map(([mStr,d])=>{
+    const m=parseInt(mStr);
+    const vt=ventas(d), pc=personal(d), gc=gastos(d), mg=margen(d);
+    const pctLab=vt>0?Math.round(pc/vt*100):0;
+    const src=d._src==='historical'?'<span class="badge badge-gray" style="font-size:9px">histórico</span>':
+              d.hasData?'<span class="badge badge-green" style="font-size:9px">banco</span>':'';
+    return`<tr style="${d.hasData?'':'opacity:.7'}">
+      <td style="font-weight:600">${d.name} ${src}</td>
+      <td class="td-mono" style="color:var(--green)">${eur(vt)}</td>
+      <td class="td-mono" style="color:var(--amber)">${eur(pc)}</td>
       <td class="td-mono" style="font-size:11px;color:var(--text3)">${pctLab}%</td>
-      <td class="td-mono" style="color:${margen>=0?'var(--green)':'var(--red)'}"><strong>${eur(Math.round(margen))}</strong></td>
+      <td class="td-mono" style="color:var(--text2)">${eur(gc)}</td>
+      <td class="td-mono" style="color:${mg>=0?'var(--green)':'var(--red)'}"><strong>${eur(Math.round(mg))}</strong></td>
+      <td><button class="btn btn-secondary btn-sm btn-icon" onclick="showPLDetail(${m},${curY})" title="Ver detalle"><i class="fa fa-magnifying-glass"></i></button></td>
     </tr>`;
   }).join('');
-  const totTpv=meses.reduce((a,m)=>a+FULL_PL[m].tpv,0);
-  const totNom=meses.reduce((a,m)=>a+Math.abs(FULL_PL[m].nom)+Math.abs(FULL_PL[m].ss),0);
-  const totMar=meses.reduce((a,m)=>{const d=FULL_PL[m];return a+d.tpv+d.ali+d.beb+d.nom+d.olab+d.ss+d.alq+d.luz+d.gas+d.tel+d.agu+(d.del||0)+(d.oi||0)+(d.imp||0);},0);
-  return`<div class="page-header"><div><h2>Cuenta de resultados ${y}</h2></div></div>
+
+  const totV=mesesConDatos.reduce((a,[,d])=>a+ventas(d),0);
+  const totP=mesesConDatos.reduce((a,[,d])=>a+personal(d),0);
+  const totG=mesesConDatos.reduce((a,[,d])=>a+gastos(d),0);
+  const totM=mesesConDatos.reduce((a,[,d])=>a+margen(d),0);
+
+  // KPIs anuales
+  const hasBankData = Object.values(pl).some(d=>d.hasData);
+  const mesesBanco = Object.values(pl).filter(d=>d.hasData).length;
+
+  return`<div class="page-header">
+    <div><h2>Cuenta de resultados ${curY}</h2>
+    <p>${hasBankData?`${mesesBanco} mes${mesesBanco!==1?'es':''} con datos bancarios reales`:'Datos históricos hardcodeados'}</p></div>
+    <div class="page-actions">
+      <button class="btn btn-secondary btn-sm" onclick="go('importer')"><i class="fa fa-file-import"></i> Importar banco</button>
+      <button class="btn btn-secondary btn-sm" onclick="showCatBreakdown(${curY})"><i class="fa fa-chart-pie"></i> Por categoría</button>
+    </div>
+  </div>
   <div class="page-body">
-    <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>Mes</th><th>Ventas</th><th>Personal</th><th>% laboral</th><th>Margen</th></tr></thead>
-      <tbody>${rows}</tbody>
-      <tfoot><tr style="font-weight:700;background:var(--bg3)">
-        <td>TOTAL</td>
-        <td class="td-mono" style="color:var(--green)">${eur(totTpv)}</td>
-        <td class="td-mono" style="color:var(--amber)">${eur(totNom)}</td>
-        <td class="td-mono">${totTpv>0?Math.round(totNom/totTpv*100)+'%':'—'}</td>
-        <td class="td-mono" style="color:${totMar>=0?'var(--green)':'var(--red)'}"><strong>${eur(Math.round(totMar))}</strong></td>
-      </tr></tfoot>
-    </table></div></div>
-    ${staffingReport()}
+    ${!hasBankData?`<div class="alert-item warning" style="margin-bottom:16px"><i class="fa fa-triangle-exclamation alert-icon"></i>
+      <div><div class="alert-msg">Mostrando datos históricos hardcodeados (hasta abril 2026)</div>
+      <div class="alert-meta">Importa el extracto bancario de BBVA en <a href="#" onclick="go('importer')" style="color:var(--accent)">Importar datos</a> y categoriza los movimientos para ver la P&G real.</div></div>
+    </div>`:
+    `<div class="alert-item info" style="margin-bottom:16px"><i class="fa fa-circle-check alert-icon" style="color:var(--green)"></i>
+      <div><div class="alert-msg">P&G calculada desde ${mesesBanco} mes${mesesBanco!==1?'es':''} de extracto bancario</div>
+      <div class="alert-meta">Categoriza bien los movimientos en <a href="#" onclick="go('bank')" style="color:var(--accent)">Extracto bancario</a> para mejorar la precisión.</div></div>
+    </div>`}
+
+    <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
+      <div class="kpi-card"><div class="kpi-label">Ventas totales</div><div class="kpi-val" style="color:var(--green)">${eur(Math.round(totV))}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Coste personal</div><div class="kpi-val" style="color:var(--amber)">${eur(Math.round(totP))}</div><div class="kpi-sub">${totV>0?Math.round(totP/totV*100)+'%':''}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Otros gastos</div><div class="kpi-val">${eur(Math.round(totG))}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Resultado neto</div><div class="kpi-val" style="color:${totM>=0?'var(--green)':'var(--red)'}">${eur(Math.round(totM))}</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Resumen mensual</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Mes</th><th>Ventas</th><th>Personal</th><th>% lab.</th><th>Otros gastos</th><th>Resultado</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr style="font-weight:700;background:var(--bg3)">
+          <td>TOTAL</td>
+          <td class="td-mono" style="color:var(--green)">${eur(Math.round(totV))}</td>
+          <td class="td-mono" style="color:var(--amber)">${eur(Math.round(totP))}</td>
+          <td class="td-mono">${totV>0?Math.round(totP/totV*100)+'%':'—'}</td>
+          <td class="td-mono">${eur(Math.round(totG))}</td>
+          <td class="td-mono" style="color:${totM>=0?'var(--green)':'var(--red)'}"><strong>${eur(Math.round(totM))}</strong></td>
+          <td></td>
+        </tr></tfoot>
+      </table></div>
+    </div>
+    <div id="plDetail" style="margin-top:16px"></div>
   </div>`;
+}
+
+function showPLDetail(m, year){
+  const CAT_MAP_INV = {
+    'ventas_tpv':'Ventas TPV','ventas_efectivo':'Efectivo','delivery':'Delivery',
+    'otros_ingresos':'Otros ingresos','nominas':'Nóminas','seg_social':'SS empresa',
+    'proveedores':'Materias primas','alquiler':'Alquiler','suministros':'Suministros',
+    'impuestos':'Impuestos','asesoria':'Asesoría','mantenimiento':'Mantenimiento',
+    'limpieza':'Limpieza','banco':'Banco','otros_gastos':'Otros gastos',
+  };
+  const mStr = year+'-'+String(m).padStart(2,'0');
+  const movs = DB.bankMovements.filter(v=>v.date&&v.date.startsWith(mStr)).sort((a,b)=>b.date.localeCompare(a.date));
+  const mLabel = new Date(year,m-1,1).toLocaleString('es-ES',{month:'long',year:'numeric'});
+
+  // Agrupar por categoría
+  const byCat = {};
+  movs.forEach(mv=>{
+    const cat=mv.category||'otros_gastos';
+    if(!byCat[cat]) byCat[cat]={label:CAT_MAP_INV[cat]||cat, total:0, count:0};
+    byCat[cat].total+=mv.amount||0;
+    byCat[cat].count++;
+  });
+
+  const catRows = Object.entries(byCat).sort((a,b)=>Math.abs(b[1].total)-Math.abs(a[1].total)).map(([cat,d])=>`
+    <tr>
+      <td style="font-size:12px">${d.label}</td>
+      <td class="td-mono" style="color:${d.total>=0?'var(--green)':'var(--red)'}">${eur(d.total)}</td>
+      <td style="font-size:11px;color:var(--text3)">${d.count} mov.</td>
+    </tr>`).join('');
+
+  const el=document.getElementById('plDetail');
+  if(el) el.innerHTML=`<div class="card">
+    <div class="card-header">
+      <span class="card-title">Detalle ${mLabel}</span>
+      <span style="font-size:12px;color:var(--text3)">${movs.length} movimientos bancarios</span>
+    </div>
+    ${movs.length?`<div class="table-wrap"><table>
+      <thead><tr><th>Categoría</th><th>Total</th><th>Movimientos</th></tr></thead>
+      <tbody>${catRows}</tbody>
+    </table></div>
+    <div style="padding:8px 16px;font-size:11px;color:var(--text3);border-top:1px solid var(--border)">
+      <i class="fa fa-circle-info"></i> Para corregir categorías ve a <a href="#" onclick="go('bank')" style="color:var(--accent)">Extracto bancario</a>
+    </div>`
+    :`<div style="padding:20px;text-align:center;color:var(--text3);font-size:13px">Sin movimientos bancarios para ${mLabel}. <a href="#" onclick="go('importer')" style="color:var(--accent)">Importar extracto</a></div>`}
+  </div>`;
+  el.scrollIntoView({behavior:'smooth'});
+}
+
+function showCatBreakdown(year){
+  const CAT_GROUPS = {
+    ingresos:['ventas_tpv','ventas_efectivo','delivery','otros_ingresos'],
+    personal:['nominas','seg_social'],
+    explotacion:['proveedores','alquiler','suministros','impuestos','asesoria','mantenimiento','limpieza','banco','otros_gastos'],
+  };
+  const CAT_LABELS = {
+    'ventas_tpv':'Ventas TPV','ventas_efectivo':'Efectivo','delivery':'Delivery',
+    'otros_ingresos':'Otros ingresos','nominas':'Nóminas','seg_social':'SS empresa',
+    'proveedores':'Mat. primas','alquiler':'Alquiler','suministros':'Suministros',
+    'impuestos':'Impuestos','asesoria':'Asesoría','mantenimiento':'Mantenimiento',
+    'limpieza':'Limpieza','banco':'Banco','otros_gastos':'Otros gastos',
+  };
+  const totals = {};
+  DB.bankMovements.filter(mv=>mv.date&&mv.date.startsWith(String(year))).forEach(mv=>{
+    const cat=mv.category||'otros_gastos';
+    totals[cat]=(totals[cat]||0)+(mv.amount||0);
+  });
+  const rows = Object.entries(totals).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).map(([cat,total])=>`
+    <tr><td style="font-size:12px">${CAT_LABELS[cat]||cat}</td>
+    <td class="td-mono" style="color:${total>=0?'var(--green)':'var(--red)'}">${eur(total)}</td></tr>`).join('');
+  modal(`<div class="modal" style="max-width:380px">
+    <div class="modal-header"><h3 class="modal-title">Gastos por categoría ${year}</h3></div>
+    <div class="modal-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>Categoría</th><th>Total</th></tr></thead>
+      <tbody>${rows||'<tr><td colspan="2" style="text-align:center;color:var(--text3)">Sin datos bancarios</td></tr>'}</tbody>
+    </table></div></div>
+    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Cerrar</button></div>
+  </div>`);
 }
 // ─────────────────────────────────────────────────────────────
 
