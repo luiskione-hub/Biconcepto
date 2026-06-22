@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gestión Biconcepto TGB · 100 Montaditos</title>
+  <!-- Fuentes -->
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!-- Iconos -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!-- Estilos -->
+  <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+
+<body>
+
+<!-- LOGIN -->
+<div id="loginScreen" class="login-screen">
+  <div class="login-box">
+    <div class="login-logo">
+      <div class="logo-tgb">TGB</div>
+      <span class="logo-sep">·</span>
+      <div class="logo-100m">100M</div>
+    </div>
+    <h1>Gestión Biconcepto</h1>
+    <p class="login-sub">Ceuta · Sistema de gestión integral</p>
+    <div class="login-form">
+      <input type="text"     id="loginUser" placeholder="Usuario"    value="admin">
+      <input type="password" id="loginPass" placeholder="Contraseña" value="1234">
+      <button id="btnLogin" class="btn-login">Entrar</button>
+      <div id="loginError" style="color:#e74c3c;font-size:12px;margin-top:8px;min-height:16px"></div>
+    </div>
+    <div class="login-roles">
+      <span id="qlAdmin">Admin</span>
+      <span id="qlGerente">Gerente</span>
+      <span id="qlEncargado">Encargado</span>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="app hidden">
+  <button class="hamburger" id="hamburger" onclick="toggleSidebar()" aria-label="Menú"><i class="fa fa-bars"></i></button>
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="brand">
+        <div class="brand-badges">
+          <span class="badge-tgb">TGB</span>
+          <span class="badge-100m">100M</span>
+        </div>
+        <span class="brand-name">Biconcepto</span>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">
+        <span class="nav-label">Principal</span>
+        <a href="#" class="nav-item active" data-page="dashboard"><i class="fa fa-chart-line"></i> Dashboard</a>
+        <a href="#" class="nav-item" data-page="alerts"><i class="fa fa-bell"></i> Alertas <span class="badge-alert" id="alertBadge">3</span></a>
+      </div>
+      <div class="nav-section">
+        <span class="nav-label">Personal</span>
+        <a href="#" class="nav-item" data-page="employees"><i class="fa fa-users"></i> Empleados</a>
+        <a href="#" class="nav-item" data-page="shifts"><i class="fa fa-calendar-days"></i> Turnos</a>
+        <a href="#" class="nav-item" data-page="schedule"><i class="fa fa-table-cells"></i> Cuadrante</a>
+        <a href="#" class="nav-item" data-page="scheduleConfig"><i class="fa fa-sliders"></i> Config. turnos</a>
+        <a href="#" class="nav-item" data-page="assignRules"><i class="fa fa-shield-halved"></i> Reglas asignación</a>
+        <a href="#" class="nav-item" data-page="optimalStaff"><i class="fa fa-calculator"></i> Plantilla óptima</a>
+        <a href="#" class="nav-item" data-page="vacations"><i class="fa fa-umbrella-beach"></i> Vacaciones</a>
+      </div>
+      <div class="nav-section">
+        <span class="nav-label">Ventas &amp; Finanzas</span>
+        <a href="#" class="nav-item" data-page="sales"><i class="fa fa-cash-register"></i> Ventas</a>
+        <a href="#" class="nav-item" data-page="bank"><i class="fa fa-building-columns"></i> Banco</a>
+        <a href="#" class="nav-item" data-page="profit"><i class="fa fa-circle-dollar-to-slot"></i> Beneficio diario</a>
+        <a href="#" class="nav-item" data-page="results"><i class="fa fa-file-invoice-dollar"></i> Cuenta resultados</a>
+        <a href="#" class="nav-item" data-page="jibble"><i class="fa fa-user-clock"></i> Plan. vs Real</a>
+      </div>
+      <div class="nav-section">
+        <span class="nav-label">Stocks</span>
+        <a href="#" class="nav-item" data-page="stocks"><i class="fa fa-boxes-stacking"></i> Gestión de stocks</a>
+        <a href="#" class="nav-item" data-page="stockOrder"><i class="fa fa-cart-plus"></i> Pedido sugerido</a>
+      </div>
+      <div class="nav-section">
+        <span class="nav-label">Planificación</span>
+        <a href="#" class="nav-item" data-page="forecast"><i class="fa fa-chart-mixed"></i> Previsión ventas</a>
+        <a href="#" class="nav-item" data-page="reports"><i class="fa fa-file-chart-column"></i> Informes</a>
+      </div>
+      <div class="nav-section">
+        <span class="nav-label">Configuración</span>
+        <a href="#" class="nav-item" data-page="legal"><i class="fa fa-scale-balanced"></i> Convenio laboral</a>
+        <a href="#" class="nav-item" data-page="costs"><i class="fa fa-sliders"></i> Costes fijos</a>
+        <a href="#" class="nav-item" data-page="objectives"><i class="fa fa-bullseye"></i> Objetivos</a>
+        <a href="#" class="nav-item" data-page="users"><i class="fa fa-user-shield"></i> Usuarios y permisos</a>
+        <a href="#" class="nav-item" data-page="importer"><i class="fa fa-file-import"></i> Importar Excel</a>
+      </div>
+    </nav>
+    <div class="sidebar-backup">
+      <button onclick="exportBackup()" title="Exportar backup"><i class="fa fa-download"></i> Backup</button>
+      <button onclick="importBackup()" title="Restaurar backup"><i class="fa fa-upload"></i> Restaurar</button>
+      <button onclick="clearStorage()" style="color:#ef4444;flex:0;width:32px" title="Borrar datos"><i class="fa fa-trash"></i></button>
+    </div>
+    <div class="sidebar-footer">
+      <div class="user-avatar" id="userAvatar">G</div>
+      <div>
+        <div class="user-name" id="userName">Gerente</div>
+        <div class="user-role" id="userRole">Gerente</div>
+      </div>
+      <button onclick="recalcularTodo()" class="btn-logout" title="Recalcular previsiones y alertas" style="color:var(--teal)"><i class="fa fa-rotate"></i></button>
+      <span id="_syncBadge" style="padding:6px;cursor:default"><i class="fa fa-circle-dot" style="color:var(--text3)" title="Estado sincronización"></i></span>
+      <button onclick="doLogout()" class="btn-logout" title="Cerrar sesión"><i class="fa fa-right-from-bracket"></i></button>
+    </div>
+  </aside>
+  <main class="main-content">
+    <div id="pageContent"></div>
+  </main>
+</div>
+
+  <!-- ═══ SCRIPTS — respetar el orden ═══ -->
+  <!-- 1. Librerías externas -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <!-- 2. Datos semilla -->
+  <script src="assets/js/data/financials.js"></script>
+  <script src="assets/js/data/salesHistory.js"></script>
+  <script src="assets/js/data/jibble.js"></script>
+
+  <!-- 3. Config y estado -->
+  <script src="assets/js/config.js"></script>
+  <script src="assets/js/state.js"></script>
+
+  <!-- 4. Utils -->
+  <script src="assets/js/utils/sanitizer.js"></script>
+  <script src="assets/js/utils/dates.js"></script>
+  <script src="assets/js/utils/formatters.js"></script>
+  <script src="assets/js/utils/calculations.js"></script>
+
+  <!-- 5. Servicios -->
+  <script src="assets/js/services/supabaseService.js"></script>
+  <script src="assets/js/services/authService.js"></script>
+  <script src="assets/js/services/excelService.js"></script>
+  <script src="assets/js/services/backupService.js"></script>
+
+  <!-- 6. Storage y router -->
+  <script src="assets/js/storage.js"></script>
+  <script src="assets/js/router.js"></script>
+
+  <!-- 7. Páginas -->
+  <script src="assets/js/pages/settings.js"></script>
+  <script src="assets/js/pages/employees.js"></script>
+  <script src="assets/js/pages/vacations.js"></script>
+  <script src="assets/js/pages/bank.js"></script>
+  <script src="assets/js/pages/sales.js"></script>
+  <script src="assets/js/pages/results.js"></script>
+  <script src="assets/js/pages/reports.js"></script>
+  <script src="assets/js/pages/importer.js"></script>
+  <script src="assets/js/pages/staffConfig.js"></script>
+  <script src="assets/js/pages/shifts.js"></script>
+  <script src="assets/js/pages/dashboard.js"></script>
+
+  <script src="assets/js/pagesMap.js"></script>
+
+  <!-- 8. Entry point -->
+  <script src="assets/js/app.js"></script>
+
+</body>
+</html>
