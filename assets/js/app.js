@@ -107,20 +107,6 @@ function forceChangePassMdl(user){
   </div>`);
 }
 
-function saveNewPass(userId){
-  const p1=$('newPass1').value, p2=$('newPass2').value;
-  if(!p1){alert('Introduce una contraseña');return;}
-  if(p1!==p2){alert('Las contraseñas no coinciden');return;}
-  if(p1.length<4){alert('Mínimo 4 caracteres');return;}
-  const u=DB.users.find(x=>x.id===userId);
-  if(!u)return;
-  u.pass=p1; u.mustChange=false;
-  audit('pass_change',`Contraseña de ${u.name} cambiada por ${DB.currentUser.name}`);
-  save(); closeModal(); flash(`✓ Contraseña de ${u.name} actualizada`);
-}
-
-function quickLogin(r){$('loginUser').value={admin:'admin',gerente:'gerente',encargado:'encargado'}[r]||r;$('loginPass').value='1234';doLogin();}
-
 // ─── Inicialización DOM ─────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function(){
   try {
@@ -138,15 +124,6 @@ document.addEventListener('DOMContentLoaded', function(){
 
     var loginUser = document.getElementById('loginUser');
     if (loginUser) loginUser.addEventListener('keydown', function(e){ if(e.key==='Enter') doLogin(); });
-
-    var qlAdmin = document.getElementById('qlAdmin');
-    if (qlAdmin) qlAdmin.addEventListener('click', function(){ quickLogin('admin'); });
-
-    var qlGerente = document.getElementById('qlGerente');
-    if (qlGerente) qlGerente.addEventListener('click', function(){ quickLogin('gerente'); });
-
-    var qlEncargado = document.getElementById('qlEncargado');
-    if (qlEncargado) qlEncargado.addEventListener('click', function(){ quickLogin('encargado'); });
 
     // Asegurar estado inicial correcto
     var ls = document.getElementById('loginScreen');
