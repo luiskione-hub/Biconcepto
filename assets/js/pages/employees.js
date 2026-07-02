@@ -143,7 +143,7 @@ function empMdl(id){
   </div>`);
 }
 
-function saveEmp(id){
+async function saveEmp(id){
   const n=$('eN').value.trim(); if(!n){alert('Introduce el nombre');return;}
   const type=$('eT').value, st=$('eS').value;
   const hr=parseFloat($('eCH').value)||hrate();
@@ -168,11 +168,26 @@ function saveEmp(id){
     notes:$('eObs').value.trim(),
     fs, avatar:n[0].toUpperCase()
   };
-  if(id&&id!==null){
-    Object.assign(DB.employees.find(x=>x.id===id),data);
+
+  const btnSave = document.querySelector('.modal-footer .btn-primary');
+  if(btnSave){ btnSave.disabled = true; btnSave.textContent = 'Guardando...'; }
+
+  const existing = id ? DB.employees.find(x=>x.id===id) : null;
+  const toSync = existing ? {...existing, ...data, id: existing.id} : {...data, id: null};
+  const result = await dbSaveEmployee(toSync);
+
+  if(!result.ok){
+    if(btnSave){ btnSave.disabled = false; btnSave.textContent = 'Guardar'; }
+    alert('Error al guardar en la base de datos: ' + result.error);
+    return;
+  }
+
+  data.id = result.id;
+
+  if(existing){
+    Object.assign(existing, data);
     audit('empleado_editado',n+' — '+data.wh+'h');
   } else {
-    data.id=maxId(DB.employees);
     DB.employees.push(data);
     audit('empleado_creado',n+' — '+data.wh+'h');
   }
