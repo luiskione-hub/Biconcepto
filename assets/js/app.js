@@ -58,6 +58,7 @@ async function doLogin(){
     }
 
     audit('login','Inicio de sesión: '+profile.name);
+    await dbSyncOnLogin();
     launchApp();
   } catch(e) {
     const errEl=$('loginError');
