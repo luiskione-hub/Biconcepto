@@ -63,30 +63,42 @@ function vacMdl(){
   </div>`);
 }
 
-function saveVac(){
+async function saveVac(){
   const s=$('vS').value, e=$('vE2').value;
   if(!s||!e){alert('Introduce fechas');return;}
   const days=Math.round((new Date(e)-new Date(s))/86400000)+1;
-  DB.vacations.push({id:maxId(DB.vacations),employee_id:parseInt($('vE').value),
-    start:s,end:e,days,status:'pending'});
+  const employee_id=$('vE').value;
+  const result=await dbSaveVacation({id:null,employee_id,start:s,end:e,status:'pending'});
+  if(!result.ok){alert('Error al guardar: '+result.error);return;}
+  DB.vacations.push({id:result.id,employee_id,start:s,end:e,days,status:'pending'});
   save();flash('✓ Vacaciones registradas');closeModal();go('vacations');
 }
 
-function approveVac(id){
+async function approveVac(id){
   const v=DB.vacations.find(x=>x.id===id);
-  if(v){v.status='approved';save();audit('vac_aprobada',DB.employees.find(e=>e.id===v.employee_id)?.name+' '+v.start+'→'+v.end);}
+  if(!v)return;
+  const result=await dbSaveVacation({...v,status:'approved'});
+  if(!result.ok){alert('Error al actualizar: '+result.error);return;}
+  v.status='approved';save();audit('vac_aprobada',DB.employees.find(e=>e.id===v.employee_id)?.name+' '+v.start+'→'+v.end);
   go('vacations');
 }
 
-function rejectVac(id){
+async function rejectVac(id){
   const v=DB.vacations.find(x=>x.id===id);
-  if(v){v.status='rejected';save();}
+  if(!v)return;
+  const result=await dbSaveVacation({...v,status:'rejected'});
+  if(!result.ok){alert('Error al actualizar: '+result.error);return;}
+  v.status='rejected';save();
   go('vacations');
 }
 
-function approveAllVac(){
+async function approveAllVac(){
   if(!confirm('¿Aprobar todas las vacaciones pendientes?'))return;
-  DB.vacations.filter(v=>v.status==='pending').forEach(v=>v.status='approved');
+  const pending=DB.vacations.filter(v=>v.status==='pending');
+  for(const v of pending){
+    await dbSaveVacation({...v,status:'approved'});
+    v.status='approved';
+  }
   save();flash('✓ Todas aprobadas');go('vacations');
 }
 
@@ -109,14 +121,17 @@ function addVacDayMdl(ds){
   </div>`);
 }
 
-function saveVacDay(startDs){
-  const empId=parseInt($('vacEmp').value);
+async function saveVacDay(startDs){
+  const empId=$('vacEmp').value;
   const endDs=$('vacEnd').value||startDs;
-  DB.vacations.push({id:maxId(DB.vacations),employee_id:empId,start:startDs,end:endDs,note:'Manual'});
+  const result=await dbSaveVacation({id:null,employee_id:empId,start:startDs,end:endDs,status:'approved',notes:'Manual'});
+  if(!result.ok){alert('Error al guardar: '+result.error);return;}
+  DB.vacations.push({id:result.id,employee_id:empId,start:startDs,end:endDs,note:'Manual',status:'approved'});
   save();closeModal();calClick(startDs);
 }
 
-function delVacDay(vacId,ds){
+async function delVacDay(vacId,ds){
+  await dbDeleteVacation(vacId);
   DB.vacations=DB.vacations.filter(x=>x.id!==vacId);
   save();calClick(ds);
 }
